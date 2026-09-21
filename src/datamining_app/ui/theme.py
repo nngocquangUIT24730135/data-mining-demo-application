@@ -9,4 +9,4 @@ ALGO_KEYS = [
 ]
 
 HAS_VIZ = {"id3", "kmeans"}
-HAS_DEMO = {"apriori", "binary_vector", "rough_set", "id3", "naive_bayes", "kmeans"}
+HAS_STEP_VIZ = {"id3", "kmeans"}

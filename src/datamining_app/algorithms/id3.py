@@ -5,7 +5,7 @@ import math
 from collections import Counter
 from typing import Any
 
-from datamining_app.algorithms.base import BaseAlgorithm
+from datamining_app.algorithms.base import BaseAlgorithm, StepLogger
 from datamining_app.algorithms.dataset_utils import excluded_headers
 from datamining_app.core.models import AlgorithmResult, Dataset, ParamDef, PredictResult
 
@@ -52,40 +52,13 @@ class ID3Algorithm(BaseAlgorithm):
         log = self._new_logger()
         counts = Counter(r[decision] for r in rows)
         info_d = entropy(rows, decision)
-        class_rows = [[label, count] for label, count in counts.items()]
-        self._growing = {
-            "is_leaf": False,
-            "attribute": "S",
-            "pending": True,
-            "children": {},
-            "samples": len(rows),
-            "class_counts": dict(counts),
-            "path": "Gốc",
-        }
-        log.add(
-            "Tính Entropy ban đầu của tập S",
-            _entropy_formula(rows, decision, "S"),
-            {
-                "entropy": info_d,
-                "class_counts": dict(counts),
-                "rows": class_rows,
-                "headers": ["Lớp", "Số mẫu"],
-                "alignments": ["left", "right"],
-                "decision": decision,
-                "sample_rows": rows,
-                "path": "Gốc",
-                "tree": copy.deepcopy(self._growing),
-                "conclusion": f"  → Entropy(S) = {info_d:.3f} bit",
-            },
-            "STEP_HEADER",
-        )
+        step_builder = _ID3Steps(log, len(rows), dict(counts))
+        step_builder.initial_entropy_step(rows, decision, info_d, counts)
 
-        self._gain_logs: list[str] = []
-        tree = self._build(rows, features, decision, max_depth, 0, log, "Gốc")
+        tree = self._build(rows, features, decision, max_depth, 0, step_builder, "Gốc")
         self._tree = tree
         self._features = features
         self._decision = decision
-        self._trained = True
 
         rules = extract_tree_rules(tree)
         summary = (
@@ -108,8 +81,7 @@ class ID3Algorithm(BaseAlgorithm):
             },
             summary=summary,
         )
-        self._last_result = result
-        return result
+        return self._finish(result)
 
     def _build(
         self,
@@ -118,7 +90,7 @@ class ID3Algorithm(BaseAlgorithm):
         decision: str,
         max_depth: int,
         depth: int,
-        log,
+        step_builder: _ID3Steps,
         path: str,
     ) -> dict[str, Any]:
         counts = Counter(r[decision] for r in rows)
@@ -130,21 +102,7 @@ class ID3Algorithm(BaseAlgorithm):
         }
         if len(counts) == 1 or not features or depth >= max_depth:
             node.update({"is_leaf": True, "label": majority, "pending": False})
-            _place_node(self._growing, path, copy.deepcopy(node))
-            log.add(
-                f"Lá — {path}",
-                f"Gán lớp '{majority}' ({_fmt_counts(counts)})."
-                + (" Tập thuần." if len(counts) == 1 else " Dừng theo ràng buộc."),
-                {
-                    **node,
-                    "headers": ["Lớp", "Số mẫu"],
-                    "rows": [[label, count] for label, count in counts.items()],
-                    "alignments": ["left", "right"],
-                    "tree": copy.deepcopy(self._growing),
-                    "conclusion": f"  → Lá = {majority}",
-                },
-                "SUCCESS",
-            )
+            step_builder.leaf_step(path, majority, counts, node)
             return node
 
         info_d = entropy(rows, decision)
@@ -174,33 +132,13 @@ class ID3Algorithm(BaseAlgorithm):
                 for value in values
             },
         }
-        _place_node(self._growing, path, split_node)
-        log.add(
-            f"Tính Information Gain — {path}",
-            _format_gains(rows, decision, info_d, gains, best, best_gain),
-            {
-                "gains": [{"feature": f, "gain": g, "info": s} for f, g, s in gains],
-                "chosen": best,
-                "entropy": info_d,
-                "path": path,
-                "split_values": values,
-                "headers": ["Thuộc tính", "Info", "Gain"],
-                "rows": [
-                    [feat, f"{split:.3f}", f"{gain:.3f}" + (" ★" if feat == best else "")]
-                    for feat, gain, split in gains
-                ],
-                "alignments": ["left", "right", "right"],
-                "tree": copy.deepcopy(self._growing),
-                "conclusion": f'  → Chọn "{best}" làm nút (Gain = {best_gain:.3f})',
-            },
-            "SUCCESS",
-        )
+        step_builder.gain_step(path, rows, decision, info_d, gains, best, split_node)
         remaining = [f for f in features if f != best]
         children = {}
         for value in values:
             subset = [r for r in rows if r[best] == value]
             children[value] = self._build(
-                subset, remaining, decision, max_depth, depth + 1, log, f"{path} / {best}={value}"
+                subset, remaining, decision, max_depth, depth + 1, step_builder, f"{path} / {best}={value}"
             )
         node.update({"is_leaf": False, "attribute": best, "gain": best_gain, "children": children})
         return node
@@ -236,25 +174,152 @@ class ID3Algorithm(BaseAlgorithm):
         )
 
 
-def _place_node(growing: dict[str, Any], path: str, node: dict[str, Any]) -> None:
-    """Insert/replace a node on the growing visualization tree (DFS snapshots)."""
-    if path == "Gốc" or not path:
-        growing.clear()
-        growing.update(copy.deepcopy(node))
-        return
-    segments = path.split(" / ")[1:]
-    current = growing
-    for i, segment in enumerate(segments):
-        _attr, _, value = segment.partition("=")
-        children = current.setdefault("children", {})
-        if i == len(segments) - 1:
-            children[value] = copy.deepcopy(node)
+class _ID3Steps:
+    def __init__(self, log: StepLogger, n_rows: int, class_counts: dict[str, int]) -> None:
+        self._log = log
+        self._growing: dict[str, Any] = {
+            "is_leaf": False,
+            "attribute": "S",
+            "pending": True,
+            "children": {},
+            "samples": n_rows,
+            "class_counts": class_counts,
+            "path": "Gốc",
+        }
+
+    def initial_entropy_step(
+        self,
+        rows: list[dict[str, str]],
+        decision: str,
+        info_d: float,
+        counts: Counter,
+    ) -> None:
+        class_rows = [[label, count] for label, count in counts.items()]
+        self._log.add(
+            "Tính Entropy ban đầu của tập S",
+            self._entropy_formula(rows, decision, "S"),
+            {
+                "entropy": info_d,
+                "class_counts": dict(counts),
+                "rows": class_rows,
+                "headers": ["Lớp", "Số mẫu"],
+                "alignments": ["left", "right"],
+                "decision": decision,
+                "sample_rows": rows,
+                "path": "Gốc",
+                "tree": copy.deepcopy(self._growing),
+                "conclusion": f"  → Entropy(S) = {info_d:.3f} bit",
+            },
+            "STEP_HEADER",
+        )
+
+    def leaf_step(self, path: str, majority: str, counts: Counter, node: dict[str, Any]) -> None:
+        self._place_node(path, node)
+        self._log.add(
+            f"Lá — {path}",
+            f"Gán lớp '{majority}' ({self._fmt_counts(counts)})."
+            + (" Tập thuần." if len(counts) == 1 else " Dừng theo ràng buộc."),
+            {
+                **node,
+                "headers": ["Lớp", "Số mẫu"],
+                "rows": [[label, count] for label, count in counts.items()],
+                "alignments": ["left", "right"],
+                "tree": copy.deepcopy(self._growing),
+                "conclusion": f"  → Lá = {majority}",
+            },
+            "SUCCESS",
+        )
+
+    def gain_step(
+        self,
+        path: str,
+        rows: list[dict[str, str]],
+        decision: str,
+        info_d: float,
+        gains: list[tuple[str, float, float]],
+        best: str,
+        split_node: dict[str, Any],
+    ) -> None:
+        best_gain = next(gain for feat, gain, _ in gains if feat == best)
+        values = sorted({r[best] for r in rows})
+        self._place_node(path, split_node)
+        self._log.add(
+            f"Tính Information Gain — {path}",
+            self._format_gains(rows, decision, info_d, gains, best),
+            {
+                "gains": [{"feature": f, "gain": g, "info": s} for f, g, s in gains],
+                "chosen": best,
+                "entropy": info_d,
+                "path": path,
+                "split_values": values,
+                "headers": ["Thuộc tính", "Info", "Gain"],
+                "rows": [
+                    [feat, f"{split:.3f}", f"{gain:.3f}" + (" ★" if feat == best else "")]
+                    for feat, gain, split in gains
+                ],
+                "alignments": ["left", "right", "right"],
+                "tree": copy.deepcopy(self._growing),
+                "conclusion": f'  → Chọn "{best}" làm nút (Gain = {best_gain:.3f})',
+            },
+            "SUCCESS",
+        )
+
+    def _place_node(self, path: str, node: dict[str, Any]) -> None:
+        """Insert/replace a node on the growing visualization tree (DFS snapshots)."""
+        if path == "Gốc" or not path:
+            self._growing.clear()
+            self._growing.update(copy.deepcopy(node))
             return
-        nxt = children.get(value)
-        if nxt is None:
-            nxt = {"is_leaf": False, "attribute": _attr, "children": {}, "pending": True}
-            children[value] = nxt
-        current = nxt
+        segments = path.split(" / ")[1:]
+        current = self._growing
+        for i, segment in enumerate(segments):
+            attr, _, value = segment.partition("=")
+            children = current.setdefault("children", {})
+            if i == len(segments) - 1:
+                children[value] = copy.deepcopy(node)
+                return
+            nxt = children.get(value)
+            if nxt is None:
+                nxt = {"is_leaf": False, "attribute": attr, "children": {}, "pending": True}
+                children[value] = nxt
+            current = nxt
+
+    @staticmethod
+    def _fmt_counts(counts: Counter) -> str:
+        return ", ".join(f"{k}: {v}" for k, v in counts.items())
+
+    @staticmethod
+    def _entropy_formula(rows: list[dict[str, str]], decision: str, name: str) -> str:
+        n = len(rows)
+        counts = Counter(r[decision] for r in rows)
+        parts = [f"  |{name}| = {n} mẫu  →  " + ", ".join(f"{v} {k}" for k, v in counts.items())]
+        terms = []
+        for label, count in counts.items():
+            terms.append(f"({count}/{n} × log₂({count}/{n}))")
+        parts.append("  Entropy = -" + " - ".join(terms))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _format_gains(
+        rows: list[dict[str, str]],
+        decision: str,
+        info_d: float,
+        gains: list[tuple[str, float, float]],
+        best: str,
+    ) -> str:
+        lines = []
+        for feat, gain, split in gains:
+            lines.append(f"  [ Thuộc tính: {feat} ]")
+            for value in sorted({r[feat] for r in rows}):
+                subset = [r for r in rows if r[feat] == value]
+                counts = Counter(r[decision] for r in subset)
+                dist = ", ".join(f"{v} {k}" for k, v in counts.items())
+                lines.append(f"    {value}: {len(subset)} mẫu → {dist}  → Entropy = {entropy(subset, decision):.3f}")
+            lines.append(f"    Info({feat}) = {split:.3f}")
+            star = "  ★" if feat == best else ""
+            lines.append(f"    Gain({feat}) = {info_d:.3f} - {split:.3f} = {gain:.3f}{star}")
+            lines.append("")
+        return "\n".join(lines)
 
 
 def entropy(rows: list[dict[str, str]], decision: str) -> float:
@@ -279,44 +344,6 @@ def information_gain(
         subset = [r for r in rows if r[feature] == value]
         split += (len(subset) / n) * entropy(subset, decision)
     return split, info_d - split
-
-
-def _fmt_counts(counts: Counter) -> str:
-    return ", ".join(f"{k}: {v}" for k, v in counts.items())
-
-
-def _entropy_formula(rows: list[dict[str, str]], decision: str, name: str) -> str:
-    n = len(rows)
-    counts = Counter(r[decision] for r in rows)
-    parts = [f"  |{name}| = {n} mẫu  →  " + ", ".join(f"{v} {k}" for k, v in counts.items())]
-    terms = []
-    for label, count in counts.items():
-        terms.append(f"({count}/{n} × log₂({count}/{n}))")
-    parts.append("  Entropy = -" + " - ".join(terms))
-    return "\n".join(parts)
-
-
-def _format_gains(
-    rows: list[dict[str, str]],
-    decision: str,
-    info_d: float,
-    gains: list[tuple[str, float, float]],
-    best: str,
-    best_gain: float,
-) -> str:
-    lines = []
-    for feat, gain, split in gains:
-        lines.append(f"  [ Thuộc tính: {feat} ]")
-        for value in sorted({r[feat] for r in rows}):
-            subset = [r for r in rows if r[feat] == value]
-            counts = Counter(r[decision] for r in subset)
-            dist = ", ".join(f"{v} {k}" for k, v in counts.items())
-            lines.append(f"    {value}: {len(subset)} mẫu → {dist}  → Entropy = {entropy(subset, decision):.3f}")
-        lines.append(f"    Info({feat}) = {split:.3f}")
-        star = "  ★" if feat == best else ""
-        lines.append(f"    Gain({feat}) = {info_d:.3f} - {split:.3f} = {gain:.3f}{star}")
-        lines.append("")
-    return "\n".join(lines)
 
 
 def extract_tree_rules(tree: dict[str, Any]) -> list[dict[str, Any]]:

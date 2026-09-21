@@ -4,7 +4,7 @@ from itertools import combinations
 from typing import Any, Iterable
 
 from datamining_app.algorithms.apriori import generate_association_rules
-from datamining_app.algorithms.base import BaseAlgorithm
+from datamining_app.algorithms.base import BaseAlgorithm, StepLogger
 from datamining_app.algorithms.dataset_utils import extract_transactions, format_itemset, minsup_count
 from datamining_app.core.models import AlgorithmResult, Dataset, ParamDef
 
@@ -48,46 +48,13 @@ class BinaryVectorAlgorithm(BaseAlgorithm):
         item_vectors = {item: _bit_vector(item, transactions) for item in items}
 
         log = self._new_logger()
-        matrix_headers = ["TID"] + items
-        matrix_rows = [
-            [f"T{i}"] + ["1" if item in txn else "0" for item in items]
-            for i, txn in enumerate(transactions, start=1)
-        ]
-        log.add(
-            "Ma trận ngữ cảnh nhị phân (O, I, R)",
-            "",
-            {
-                "items": items,
-                "transactions": transactions,
-                "vectors": {k: list(v) for k, v in item_vectors.items()},
-                "headers": matrix_headers,
-                "rows": matrix_rows,
-                "alignments": ["left"] + ["center"] * len(items),
-            },
-            "STEP_HEADER",
-        )
-        log.add(
-            "Khởi tạo",
-            f"N = {n} giao dịch, |I| = {len(items)}.\n"
-            f"minsup = {minsup:.2%}  →  Count ≥ {min_count} (SP = Count/N)\n"
-            f"minconf = {minconf:.2%}.",
-            {"n": n, "minsup": minsup, "min_count": min_count, "minconf": minconf},
-        )
+        steps = _BinarySteps(log)
+        steps.matrix_step(items, transactions, item_vectors)
+        steps.init_step(n, minsup, min_count, minconf, len(items))
 
         mined = mine_binary_vectors(item_vectors, n, minsup)
         for level in mined.levels_detail:
-            k = level["k"]
-            log.add(
-                f"Cấp k = {k} — Vector F_{k}",
-                "" if level["rows"] else "Không sinh được tập ứng viên.",
-                {
-                    "k": k,
-                    "candidates": level["rows"],
-                    "frequent": [list(s) for s in level["frequent"]],
-                    "conclusion": f"  → F_{k} = {_fmt(level['frequent'])}",
-                },
-                "SUCCESS" if level["frequent"] else "WARNING",
-            )
+            steps.level_step(level)
 
         supports = mined.supports
         freq_rows = []
@@ -96,31 +63,9 @@ class BinaryVectorAlgorithm(BaseAlgorithm):
                 sp = supports[itemset]
                 count = int(round(sp * n))
                 freq_rows.append([str(k_level), format_itemset(itemset), count, f"{sp * 100:.2f}%"])
-        log.add(
-            "Tổng hợp tập phổ biến",
-            "",
-            {
-                "headers": ["Cấp k", "Tập phổ biến", "Count", "Support"],
-                "rows": freq_rows,
-                "alignments": ["right", "left", "right", "right"],
-                "conclusion": f"  → {len(freq_rows)} tập phổ biến.",
-            },
-            "SUCCESS",
-        )
+        steps.summary_step(freq_rows)
         rules = generate_association_rules(supports, minconf)
-        log.add(
-            "Sinh luật kết hợp từ tập phổ biến",
-            "",
-            {
-                "rules": rules,
-                "conclusion": (
-                    f"  → {len(rules)} luật đạt minconf = {minconf:.2%}."
-                    if rules
-                    else f"  → Không có luật nào đạt minconf = {minconf:.2%}."
-                ),
-            },
-            "SUCCESS",
-        )
+        steps.rules_step(rules, minconf)
 
         levels = {k: [list(s) for s in sets] for k, sets in mined.levels.items()}
         summary = (
@@ -141,9 +86,82 @@ class BinaryVectorAlgorithm(BaseAlgorithm):
             },
             summary=summary,
         )
-        self._last_result = result
-        self._trained = True
-        return result
+        return self._finish(result)
+
+
+class _BinarySteps:
+    def __init__(self, log: StepLogger) -> None:
+        self._log = log
+
+    def matrix_step(
+        self,
+        items: list[str],
+        transactions: list[list[str]],
+        item_vectors: dict[str, list[int]],
+    ) -> None:
+        matrix_headers = ["TID"] + items
+        matrix_rows = [
+            [f"T{i}"] + ["1" if item in txn else "0" for item in items]
+            for i, txn in enumerate(transactions, start=1)
+        ]
+        self._log.add_table(
+            "Ma trận ngữ cảnh nhị phân (O, I, R)",
+            matrix_headers,
+            matrix_rows,
+            ["left"] + ["center"] * len(items),
+            level="STEP_HEADER",
+            items=items,
+            transactions=transactions,
+            vectors={k: list(v) for k, v in item_vectors.items()},
+        )
+
+    def init_step(self, n: int, minsup: float, min_count: int, minconf: float, n_items: int) -> None:
+        self._log.add(
+            "Khởi tạo",
+            f"N = {n} giao dịch, |I| = {n_items}.\n"
+            f"minsup = {minsup:.2%}  →  Count ≥ {min_count} (SP = Count/N)\n"
+            f"minconf = {minconf:.2%}.",
+            {"n": n, "minsup": minsup, "min_count": min_count, "minconf": minconf},
+        )
+
+    def level_step(self, level: dict[str, Any]) -> None:
+        k = level["k"]
+        self._log.add(
+            f"Cấp k = {k} — Vector F_{k}",
+            "" if level["rows"] else "Không sinh được tập ứng viên.",
+            {
+                "k": k,
+                "candidates": level["rows"],
+                "frequent": [list(s) for s in level["frequent"]],
+                "conclusion": f"  → F_{k} = {_fmt(level['frequent'])}",
+            },
+            "SUCCESS" if level["frequent"] else "WARNING",
+        )
+
+    def summary_step(self, freq_rows: list[list[Any]]) -> None:
+        self._log.add_table(
+            "Tổng hợp tập phổ biến",
+            ["Cấp k", "Tập phổ biến", "Count", "Support"],
+            freq_rows,
+            ["right", "left", "right", "right"],
+            level="SUCCESS",
+            conclusion=f"  → {len(freq_rows)} tập phổ biến.",
+        )
+
+    def rules_step(self, rules: list[dict[str, Any]], minconf: float) -> None:
+        self._log.add(
+            "Sinh luật kết hợp từ tập phổ biến",
+            "",
+            {
+                "rules": rules,
+                "conclusion": (
+                    f"  → {len(rules)} luật đạt minconf = {minconf:.2%}."
+                    if rules
+                    else f"  → Không có luật nào đạt minconf = {minconf:.2%}."
+                ),
+            },
+            "SUCCESS",
+        )
 
 
 class BinaryMineResult:
@@ -240,5 +258,3 @@ def _fmt(level: list[tuple[str, ...]]) -> str:
     if not level:
         return "∅"
     return "{" + ", ".join(format_itemset(x) for x in level) + "}"
-
-

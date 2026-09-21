@@ -3,7 +3,7 @@ from __future__ import annotations
 from itertools import combinations
 from typing import Any
 
-from datamining_app.algorithms.base import BaseAlgorithm
+from datamining_app.algorithms.base import BaseAlgorithm, StepLogger
 from datamining_app.algorithms.dataset_utils import (
     extract_transactions,
     format_itemset,
@@ -47,75 +47,25 @@ class AprioriAlgorithm(BaseAlgorithm):
         min_count = minsup_count(minsup, n)
 
         log = self._new_logger()
-        log.add(
-            "Khởi tạo",
-            f"N = {n} giao dịch.\n"
-            f"minsup = {minsup:.2%}  →  min_count = ⌈{minsup}×{n}⌉ = {min_count}\n"
-            f"minconf = {minconf:.2%}.",
-            {"n": n, "minsup": minsup, "min_count": min_count, "minconf": minconf},
-            "STEP_HEADER",
-        )
+        steps = _AprioriSteps(log)
+        steps.init_step(n, minsup, min_count, minconf)
 
         items = sorted({item for txn in transactions for item in txn})
         c1 = [(item,) for item in items]
         l1, c1_rows = _filter_frequent(c1, transactions, n, min_count, minsup)
-        log.add(
-            "Cấp k = 1 — C₁ và L₁",
-            "",
-            {
-                "k": 1,
-                "candidates": c1_rows,
-                "frequent": [list(x) for x in l1],
-                "conclusion": f"  → L₁ = {_format_level(l1)}",
-            },
-            "SUCCESS",
-        )
+        steps.level_step(1, c1_rows, l1)
 
         levels: dict[int, list[tuple[str, ...]]] = {1: l1}
         k = 2
         prev = l1
         while prev:
             ck, pruned = apriori_gen(prev)
-            join_rows = [[format_itemset(x), "✓ Giữ"] for x in ck]
-            join_rows.extend([[format_itemset(x), "✗ Cắt tỉa (thiếu tập con k−1)"] for x in pruned])
-            log.add(
-                f"Cấp k = {k} — Join & Prune",
-                _describe_join_prune(prev, k),
-                {
-                    "k": k,
-                    "join_candidates": [list(x) for x in ck],
-                    "pruned": [list(x) for x in pruned],
-                    **(
-                        {
-                            "headers": ["Ứng viên Cₖ", "Kết luận"],
-                            "rows": join_rows,
-                            "alignments": ["left", "left"],
-                        }
-                        if join_rows
-                        else {}
-                    ),
-                },
-            )
+            steps.join_prune_step(k, prev, ck, pruned)
             if not ck:
-                log.add(
-                    f"Cấp k = {k} — Dừng",
-                    f"C_{k} = ∅ nên L_{k} = ∅. Thuật toán dừng.",
-                    {"k": k, "conclusion": f"  → Dừng tại k = {k}."},
-                    "WARNING",
-                )
+                steps.stop_step(k)
                 break
             lk, ck_rows = _filter_frequent(ck, transactions, n, min_count, minsup)
-            log.add(
-                f"Cấp k = {k} — C_{k} và L_{k}",
-                "",
-                {
-                    "k": k,
-                    "candidates": ck_rows,
-                    "frequent": [list(x) for x in lk],
-                    "conclusion": f"  → L_{k} = {_format_level(lk)}",
-                },
-                "SUCCESS" if lk else "WARNING",
-            )
+            steps.level_step(k, ck_rows, lk)
             if not lk:
                 break
             levels[k] = lk
@@ -133,35 +83,9 @@ class AprioriAlgorithm(BaseAlgorithm):
                     [str(level_k), format_itemset(itemset), support_count(itemset, transactions), f"{sp * 100:.2f}%"]
                 )
         n_freq = len(freq_rows)
-        log.add(
-            "Tổng hợp tập phổ biến",
-            "",
-            {
-                "headers": ["Cấp k", "Tập phổ biến", "Count", "Support"],
-                "rows": freq_rows,
-                "alignments": ["right", "left", "right", "right"],
-                "frequent_rows": freq_rows,
-                "conclusion": (
-                    f"  → {n_freq} tập phổ biến. "
-                    f"Tối đại: {', '.join(format_itemset(x) for x in maximal) or '∅'}."
-                ),
-            },
-            "SUCCESS",
-        )
+        steps.summary_step(freq_rows, maximal)
         rules = generate_association_rules(all_frequent, minconf)
-        log.add(
-            "Sinh luật kết hợp",
-            "",
-            {
-                "rules": rules,
-                "conclusion": (
-                    f"  → {len(rules)} luật đạt minconf = {minconf:.2%}."
-                    if rules
-                    else f"  → Không có luật nào đạt minconf = {minconf:.2%}."
-                ),
-            },
-            "SUCCESS",
-        )
+        steps.rules_step(rules, minconf)
 
         summary = (
             f"Apriori tìm {n_freq} tập phổ biến "
@@ -181,9 +105,118 @@ class AprioriAlgorithm(BaseAlgorithm):
             },
             summary=summary,
         )
-        self._last_result = result
-        self._trained = True
-        return result
+        return self._finish(result)
+
+
+class _AprioriSteps:
+    def __init__(self, log: StepLogger) -> None:
+        self._log = log
+
+    def init_step(self, n: int, minsup: float, min_count: int, minconf: float) -> None:
+        self._log.add(
+            "Khởi tạo",
+            f"N = {n} giao dịch.\n"
+            f"minsup = {minsup:.2%}  →  min_count = ⌈{minsup}×{n}⌉ = {min_count}\n"
+            f"minconf = {minconf:.2%}.",
+            {"n": n, "minsup": minsup, "min_count": min_count, "minconf": minconf},
+            "STEP_HEADER",
+        )
+
+    def level_step(self, k: int, c_rows: list[dict[str, Any]], l_k: list[tuple[str, ...]]) -> None:
+        if k == 1:
+            title = "Cấp k = 1 — C₁ và L₁"
+            conclusion = f"  → L₁ = {self._format_level(l_k)}"
+            level = "SUCCESS"
+        else:
+            title = f"Cấp k = {k} — C_{k} và L_{k}"
+            conclusion = f"  → L_{k} = {self._format_level(l_k)}"
+            level = "SUCCESS" if l_k else "WARNING"
+        self._log.add(
+            title,
+            "",
+            {
+                "k": k,
+                "candidates": c_rows,
+                "frequent": [list(x) for x in l_k],
+                "conclusion": conclusion,
+            },
+            level,
+        )
+
+    def join_prune_step(
+        self,
+        k: int,
+        prev: list[tuple[str, ...]],
+        ck: list[tuple[str, ...]],
+        pruned: list[tuple[str, ...]],
+    ) -> None:
+        join_rows = [[format_itemset(x), "✓ Giữ"] for x in ck]
+        join_rows.extend([[format_itemset(x), "✗ Cắt tỉa (thiếu tập con k−1)"] for x in pruned])
+        data: dict[str, Any] = {
+            "k": k,
+            "join_candidates": [list(x) for x in ck],
+            "pruned": [list(x) for x in pruned],
+        }
+        if join_rows:
+            data.update(
+                {
+                    "headers": ["Ứng viên Cₖ", "Kết luận"],
+                    "rows": join_rows,
+                    "alignments": ["left", "left"],
+                }
+            )
+        self._log.add(f"Cấp k = {k} — Join & Prune", self._describe_join_prune(prev, k), data)
+
+    def stop_step(self, k: int) -> None:
+        self._log.add(
+            f"Cấp k = {k} — Dừng",
+            f"C_{k} = ∅ nên L_{k} = ∅. Thuật toán dừng.",
+            {"k": k, "conclusion": f"  → Dừng tại k = {k}."},
+            "WARNING",
+        )
+
+    def summary_step(self, freq_rows: list[list[Any]], maximal: list[tuple[str, ...]]) -> None:
+        n_freq = len(freq_rows)
+        self._log.add_table(
+            "Tổng hợp tập phổ biến",
+            ["Cấp k", "Tập phổ biến", "Count", "Support"],
+            freq_rows,
+            ["right", "left", "right", "right"],
+            level="SUCCESS",
+            frequent_rows=freq_rows,
+            conclusion=(
+                f"  → {n_freq} tập phổ biến. "
+                f"Tối đại: {', '.join(format_itemset(x) for x in maximal) or '∅'}."
+            ),
+        )
+
+    def rules_step(self, rules: list[dict[str, Any]], minconf: float) -> None:
+        self._log.add(
+            "Sinh luật kết hợp",
+            "",
+            {
+                "rules": rules,
+                "conclusion": (
+                    f"  → {len(rules)} luật đạt minconf = {minconf:.2%}."
+                    if rules
+                    else f"  → Không có luật nào đạt minconf = {minconf:.2%}."
+                ),
+            },
+            "SUCCESS",
+        )
+
+    @staticmethod
+    def _format_level(level: list[tuple[str, ...]]) -> str:
+        if not level:
+            return "∅"
+        return "{" + ", ".join(format_itemset(x) for x in level) + "}"
+
+    @classmethod
+    def _describe_join_prune(cls, prev: list[tuple[str, ...]], k: int) -> str:
+        return (
+            f"Join L_{k-1} ⋈ L_{k-1}: hai tập trùng {k-2} phần tử đầu và phần tử cuối l1 < l2.\n"
+            f"L_{k-1} = {cls._format_level(prev)}"
+        )
 
 
 def apriori_gen(prev: list[tuple[str, ...]]) -> tuple[list[tuple[str, ...]], list[tuple[str, ...]]]:
@@ -264,22 +297,6 @@ def _filter_frequent(
         if accepted:
             frequent.append(itemset)
     return frequent, rows
-
-
-def _format_level(level: list[tuple[str, ...]]) -> str:
-    if not level:
-        return "∅"
-    return "{" + ", ".join(format_itemset(x) for x in level) + "}"
-
-
-def _describe_join_prune(
-    prev: list[tuple[str, ...]],
-    k: int,
-) -> str:
-    return (
-        f"Join L_{k-1} ⋈ L_{k-1}: hai tập trùng {k-2} phần tử đầu và phần tử cuối l1 < l2.\n"
-        f"L_{k-1} = {_format_level(prev)}"
-    )
 
 
 def _maximal_itemsets(levels: dict[int, list[tuple[str, ...]]]) -> list[tuple[str, ...]]:

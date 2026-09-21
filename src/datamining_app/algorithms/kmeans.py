@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from datamining_app.algorithms.base import BaseAlgorithm
+from datamining_app.algorithms.base import BaseAlgorithm, StepLogger
 from datamining_app.algorithms.dataset_utils import excluded_headers, to_float
 from datamining_app.core.models import AlgorithmResult, Dataset, ParamDef, PredictResult
 
@@ -107,32 +107,11 @@ class KMeansAlgorithm(BaseAlgorithm):
         formula = (
             "d(x,y) = √(Σ (xᵢ-yᵢ)²)" if metric == "euclidean" else "d(x,y) = Σ |xᵢ-yᵢ|"
         )
-        init_headers = ["Tâm"] + features
-        init_rows = [
-            [f"m{i}"] + [f"{v:.3f}" for v in c]
-            for i, c in enumerate(centroids, start=1)
-        ]
-        log.add(
-            "Khởi tạo",
-            f"K = {k}, metric = {metric}, max_iter = {max_iter}, seed = {seed}\n"
-            f"Đặc trưng: {', '.join(features)}\n"
-            f"{formula}\n"
-            f"{init_note}",
-            {
-                "k": k,
-                "centroids": [list(c) for c in centroids],
-                "features": features,
-                "metric": metric,
-                "headers": init_headers,
-                "rows": init_rows,
-                "alignments": ["left"] + ["right"] * len(features),
-                "phase": "init",
-            },
-            "STEP_HEADER",
-        )
+        steps = _KMeansSteps(log)
+        steps.init_step(k, metric, max_iter, seed, features, centroids, formula, init_note)
 
         history = []
-        assignments: list[int] = [0] * len(points)
+        assignments: list[int] = []
         sse_prev = None
         for iteration in range(1, max_iter + 1):
             assignments = []
@@ -183,75 +162,22 @@ class KMeansAlgorithm(BaseAlgorithm):
                 "changed": changed,
             }
             history.append(snap)
-            assign_headers = ["Điểm"] + [f"d(C{j})" for j in range(1, k + 1)] + ["Cụm"]
-            assign_rows = [
-                [row["id"], *[f"{d:.3f}" for d in row["distances"]], f"C{row['cluster']}"]
-                for row in dist_rows
-            ]
-            cluster_lines = []
-            for i, members in enumerate(clusters, start=1):
-                ids = ", ".join(points[j]["id"] for j in members) or "∅"
-                cluster_lines.append(f"  → Cụm {i}: {{ {ids} }}")
-            if changed:
-                cluster_lines.append("  ✦ Đổi cụm: " + "; ".join(changed))
-            assign_snap = {**snap, "phase": "assign", "headers": assign_headers, "rows": assign_rows,
-                           "alignments": ["left"] + ["right"] * k + ["center"],
-                           "conclusion": "\n".join(cluster_lines)}
-            update_headers = ["Cụm", "Tâm cũ", "Tâm mới"]
-            update_rows = []
-            for i, (old, new) in enumerate(zip(centroids, new_centroids), start=1):
-                update_rows.append(
-                    [
-                        f"C{i}",
-                        "(" + ", ".join(f"{v:.3f}" for v in old) + ")",
-                        "(" + ", ".join(f"{v:.3f}" for v in new) + ")",
-                    ]
-                )
-            update_snap = {
-                **snap,
-                "phase": "update",
-                "headers": update_headers,
-                "rows": update_rows,
-                "alignments": ["left", "left", "left"],
-                "conclusion": f"  → SSE = {sse:.4f}",
-            }
-            log.add(
-                f"Iteration {iteration} — Bước Gán (Assignment)",
-                f"d(P, C) theo {metric}",
-                assign_snap,
-                "SUCCESS",
-            )
-            log.add(
-                f"Iteration {iteration} — Bước Cập nhật Trọng tâm (Update)",
-                "",
-                update_snap,
-                "SUCCESS",
-            )
+            steps.assign_step(iteration, snap, points, k)
+            steps.update_step(iteration, snap, centroids, new_centroids, sse)
 
             converged = _same_centroids(centroids, new_centroids)
             centroids = new_centroids
             if sse_prev is not None and sse > sse_prev + 1e-9:
-                log.add(
-                    "Cảnh báo SSE",
-                    f"SSE tăng từ {sse_prev:.4f} lên {sse:.4f}.",
-                    {"iteration": iteration, "sse": sse, "sse_prev": sse_prev, "phase": "warning"},
-                    "WARNING",
-                )
+                steps.sse_warning_step(iteration, sse, sse_prev)
             sse_prev = sse
             if converged:
-                log.add(
-                    "Hội tụ",
-                    f"Tâm không đổi sau vòng {iteration}. SSE = {sse:.4f}.",
-                    {"iteration": iteration, "sse": sse, "phase": "converged"},
-                    "SUCCESS",
-                )
+                steps.convergence_step(iteration, sse)
                 break
 
         self._centroids = centroids
         self._features = features
         self._distance = metric
         self._points = points
-        self._trained = True
         for i, point in enumerate(points):
             point["cluster"] = assignments[i] + 1
 
@@ -285,8 +211,7 @@ class KMeansAlgorithm(BaseAlgorithm):
             },
             summary=summary,
         )
-        self._last_result = result
-        return result
+        return self._finish(result)
 
     def predict(self, sample: dict[str, Any]) -> PredictResult:
         if not self._trained:
@@ -312,6 +237,133 @@ class KMeansAlgorithm(BaseAlgorithm):
             explanation="\n".join(lines),
             details={"distances": distances, "cluster": cluster, "vector": vec},
             sample=sample,
+        )
+
+
+class _KMeansSteps:
+    def __init__(self, log: StepLogger) -> None:
+        self._log = log
+        self._metric = "euclidean"
+
+    def init_step(
+        self,
+        k: int,
+        metric: str,
+        max_iter: int,
+        seed: int,
+        features: list[str],
+        centroids: list[list[float]],
+        formula: str,
+        init_note: str,
+    ) -> None:
+        self._metric = metric
+        init_headers = ["Tâm"] + features
+        init_rows = [
+            [f"m{i}"] + [f"{v:.3f}" for v in c]
+            for i, c in enumerate(centroids, start=1)
+        ]
+        self._log.add_table(
+            "Khởi tạo",
+            init_headers,
+            init_rows,
+            ["left"] + ["right"] * len(features),
+            description=(
+                f"K = {k}, metric = {metric}, max_iter = {max_iter}, seed = {seed}\n"
+                f"Đặc trưng: {', '.join(features)}\n"
+                f"{formula}\n"
+                f"{init_note}"
+            ),
+            level="STEP_HEADER",
+            k=k,
+            centroids=[list(c) for c in centroids],
+            features=features,
+            metric=metric,
+            phase="init",
+        )
+
+    def assign_step(
+        self,
+        iteration: int,
+        snap: dict[str, Any],
+        points: list[dict[str, Any]],
+        k: int,
+    ) -> None:
+        dist_rows = snap["distances"]
+        assign_headers = ["Điểm"] + [f"d(C{j})" for j in range(1, k + 1)] + ["Cụm"]
+        assign_rows = [
+            [row["id"], *[f"{d:.3f}" for d in row["distances"]], f"C{row['cluster']}"]
+            for row in dist_rows
+        ]
+        cluster_lines = []
+        for i in range(1, k + 1):
+            ids = ", ".join(
+                point["id"] for point, assigned in zip(points, snap["assignments"]) if assigned == i
+            ) or "∅"
+            cluster_lines.append(f"  → Cụm {i}: {{ {ids} }}")
+        if snap["changed"]:
+            cluster_lines.append("  ✦ Đổi cụm: " + "; ".join(snap["changed"]))
+        assign_snap = {
+            **snap,
+            "phase": "assign",
+            "headers": assign_headers,
+            "rows": assign_rows,
+            "alignments": ["left"] + ["right"] * k + ["center"],
+            "conclusion": "\n".join(cluster_lines),
+        }
+        self._log.add(
+            f"Iteration {iteration} — Bước Gán (Assignment)",
+            f"d(P, C) theo {self._metric}",
+            assign_snap,
+            "SUCCESS",
+        )
+
+    def update_step(
+        self,
+        iteration: int,
+        snap: dict[str, Any],
+        centroids: list[list[float]],
+        new_centroids: list[list[float]],
+        sse: float,
+    ) -> None:
+        update_headers = ["Cụm", "Tâm cũ", "Tâm mới"]
+        update_rows = []
+        for i, (old, new) in enumerate(zip(centroids, new_centroids), start=1):
+            update_rows.append(
+                [
+                    f"C{i}",
+                    "(" + ", ".join(f"{v:.3f}" for v in old) + ")",
+                    "(" + ", ".join(f"{v:.3f}" for v in new) + ")",
+                ]
+            )
+        update_snap = {
+            **snap,
+            "phase": "update",
+            "headers": update_headers,
+            "rows": update_rows,
+            "alignments": ["left", "left", "left"],
+            "conclusion": f"  → SSE = {sse:.4f}",
+        }
+        self._log.add(
+            f"Iteration {iteration} — Bước Cập nhật Trọng tâm (Update)",
+            "",
+            update_snap,
+            "SUCCESS",
+        )
+
+    def sse_warning_step(self, iteration: int, sse: float, sse_prev: float) -> None:
+        self._log.add(
+            "Cảnh báo SSE",
+            f"SSE tăng từ {sse_prev:.4f} lên {sse:.4f}.",
+            {"iteration": iteration, "sse": sse, "sse_prev": sse_prev, "phase": "warning"},
+            "WARNING",
+        )
+
+    def convergence_step(self, iteration: int, sse: float) -> None:
+        self._log.add(
+            "Hội tụ",
+            f"Tâm không đổi sau vòng {iteration}. SSE = {sse:.4f}.",
+            {"iteration": iteration, "sse": sse, "phase": "converged"},
+            "SUCCESS",
         )
 
 

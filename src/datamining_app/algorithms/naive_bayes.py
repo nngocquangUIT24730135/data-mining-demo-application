@@ -4,7 +4,7 @@ import math
 from collections import Counter
 from typing import Any
 
-from datamining_app.algorithms.base import BaseAlgorithm
+from datamining_app.algorithms.base import BaseAlgorithm, StepLogger
 from datamining_app.algorithms.dataset_utils import excluded_headers
 from datamining_app.core.models import AlgorithmResult, Dataset, ParamDef, PredictResult
 
@@ -77,48 +77,10 @@ class NaiveBayesAlgorithm(BaseAlgorithm):
                     likelihoods[cls][feat][value] = (count + alpha) / (n_c + alpha * v) if (n_c + alpha * v) else 0.0
 
         log = self._new_logger()
-        log.add(
-            "Xác suất tiên nghiệm P(C)",
-            "P(C) = n_C / N",
-            {
-                "priors": priors,
-                "class_counts": dict(class_counts),
-                "alpha": alpha,
-                "headers": ["Lớp", "Count", "P(C)"],
-                "rows": [[cls, class_counts[cls], f"{priors[cls]:.4f}"] for cls in classes],
-                "alignments": ["left", "right", "right"],
-                "conclusion": f"  → α Laplace = {alpha}",
-            },
-            "STEP_HEADER",
-        )
+        steps = _NaiveBayesSteps(log)
+        steps.prior_step(priors, class_counts, classes, alpha)
         for feat in features:
-            like_rows = []
-            v = len(vocab[feat])
-            for cls in classes:
-                n_c = class_counts[cls]
-                for value in vocab[feat]:
-                    count = value_counts[cls][feat][value]
-                    p = likelihoods[cls][feat][value]
-                    like_rows.append(
-                        [
-                            cls,
-                            value,
-                            count,
-                            f"{p:.4f}",
-                            f"({count}+{alpha})/({n_c}+{alpha}×{v})",
-                        ]
-                    )
-            log.add(
-                f"Bảng likelihood — {feat}",
-                f"P({feat}=v | C) = (count + α) / (n_C + α·|{feat}|)",
-                {
-                    "feature": feat,
-                    "headers": ["Lớp", "Giá trị", "Count", "P(v|C)", "Công thức"],
-                    "rows": like_rows,
-                    "alignments": ["left", "left", "right", "right", "left"],
-                },
-                "DATA",
-            )
+            steps.likelihood_step(feat, vocab, classes, class_counts, value_counts, likelihoods, alpha)
 
         self._priors = priors
         self._likelihoods = likelihoods
@@ -129,7 +91,6 @@ class NaiveBayesAlgorithm(BaseAlgorithm):
         self._decision = decision
         self._alpha = alpha
         self._n = n
-        self._trained = True
 
         summary = (
             f"Naïve Bayes với α = {alpha}. {len(classes)} lớp, {len(features)} thuộc tính. "
@@ -149,8 +110,7 @@ class NaiveBayesAlgorithm(BaseAlgorithm):
             },
             summary=summary,
         )
-        self._last_result = result
-        return result
+        return self._finish(result)
 
     def predict(self, sample: dict[str, Any]) -> PredictResult:
         if not self._trained:
@@ -199,4 +159,65 @@ class NaiveBayesAlgorithm(BaseAlgorithm):
             explanation="\n".join(lines),
             details={"posteriors": posteriors, "scores": {c: s["log"] for c, s in scores.items()}},
             sample=normalized,
+        )
+
+
+class _NaiveBayesSteps:
+    def __init__(self, log: StepLogger) -> None:
+        self._log = log
+
+    def prior_step(
+        self,
+        priors: dict[str, float],
+        class_counts: Counter,
+        classes: list[str],
+        alpha: float,
+    ) -> None:
+        self._log.add_table(
+            "Xác suất tiên nghiệm P(C)",
+            ["Lớp", "Count", "P(C)"],
+            [[cls, class_counts[cls], f"{priors[cls]:.4f}"] for cls in classes],
+            ["left", "right", "right"],
+            description="P(C) = n_C / N",
+            level="STEP_HEADER",
+            priors=priors,
+            class_counts=dict(class_counts),
+            alpha=alpha,
+            conclusion=f"  → α Laplace = {alpha}",
+        )
+
+    def likelihood_step(
+        self,
+        feat: str,
+        vocab: dict[str, list[str]],
+        classes: list[str],
+        class_counts: Counter,
+        value_counts: dict[str, dict[str, dict[str, int]]],
+        likelihoods: dict[str, dict[str, dict[str, float]]],
+        alpha: float,
+    ) -> None:
+        like_rows = []
+        v = len(vocab[feat])
+        for cls in classes:
+            n_c = class_counts[cls]
+            for value in vocab[feat]:
+                count = value_counts[cls][feat][value]
+                p = likelihoods[cls][feat][value]
+                like_rows.append(
+                    [
+                        cls,
+                        value,
+                        count,
+                        f"{p:.4f}",
+                        f"({count}+{alpha})/({n_c}+{alpha}×{v})",
+                    ]
+                )
+        self._log.add_table(
+            f"Bảng likelihood — {feat}",
+            ["Lớp", "Giá trị", "Count", "P(v|C)", "Công thức"],
+            like_rows,
+            ["left", "left", "right", "right", "left"],
+            description=f"P({feat}=v | C) = (count + α) / (n_C + α·|{feat}|)",
+            level="DATA",
+            feature=feat,
         )

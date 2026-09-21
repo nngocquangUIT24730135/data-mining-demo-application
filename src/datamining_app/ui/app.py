@@ -11,7 +11,7 @@ from datamining_app.ui.pages.id3_page import ID3Page
 from datamining_app.ui.pages.kmeans_page import KMeansPage
 from datamining_app.ui.pages.naive_bayes_page import NaiveBayesPage
 from datamining_app.ui.pages.rough_set_page import RoughSetPage
-from datamining_app.ui.theme import ALGO_KEYS, HAS_DEMO, HAS_VIZ
+from datamining_app.ui.theme import ALGO_KEYS, HAS_STEP_VIZ, HAS_VIZ
 from datamining_app.ui.windowing import maximize
 
 
@@ -87,7 +87,7 @@ class MainApp(tk.Tk):
         self.pseudo_btn.pack(side="left", padx=4)
         self.demo_btn = ttk.Button(bar, text=i18n.t("demo_steps"), command=self._demo)
         self.demo_btn.pack(side="left", padx=4)
-        self.viz_btn = ttk.Button(bar, text=i18n.t("show_graph"), command=self._graph)
+        self.viz_btn = ttk.Button(bar, text=i18n.t("result_graph"), command=self._graph)
         self.viz_btn.pack(side="left", padx=4)
         self.predict_btn = ttk.Button(bar, text=i18n.t("predict_toggle"), command=self._predict)
         self.predict_btn.pack(side="left", padx=4)
@@ -128,7 +128,7 @@ class MainApp(tk.Tk):
         self.run_btn.configure(state="disabled" if home else "normal")
         self.pseudo_btn.configure(state="disabled" if home else "normal")
         self.txt_btn.configure(state="disabled" if home else "normal")
-        self.demo_btn.configure(state="normal" if self.current_key in HAS_DEMO else "disabled")
+        self.demo_btn.configure(state="normal" if self.current_key in HAS_STEP_VIZ else "disabled")
         self.viz_btn.configure(state="normal" if self.current_key in HAS_VIZ else "disabled")
         can_predict = bool(algo and getattr(algo, "supports_predict", False))
         self.predict_btn.configure(state="normal" if can_predict else "disabled")
@@ -197,7 +197,7 @@ class MainApp(tk.Tk):
         self.run_btn.configure(text=i18n.t("run"))
         self.pseudo_btn.configure(text=i18n.t("pseudocode"))
         self.demo_btn.configure(text=i18n.t("demo_steps"))
-        self.viz_btn.configure(text=i18n.t("show_graph"))
+        self.viz_btn.configure(text=i18n.t("result_graph"))
         self.predict_btn.configure(text=i18n.t("predict_toggle"))
         self.txt_btn.configure(text=i18n.t("export_txt"))
         self._refresh_algo_combo()

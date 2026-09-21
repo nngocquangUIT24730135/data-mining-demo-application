@@ -24,11 +24,16 @@ class BaseAlgorithm(ABC):
     def predict(self, sample: dict[str, Any]) -> PredictResult:
         raise NotImplementedError("Thuật toán này không hỗ trợ dự đoán.")
 
-    def _new_logger(self) -> _StepLogger:
-        return _StepLogger()
+    def _new_logger(self) -> StepLogger:
+        return StepLogger()
+
+    def _finish(self, result: AlgorithmResult, *, trained: bool = True) -> AlgorithmResult:
+        self._last_result = result
+        self._trained = trained
+        return result
 
 
-class _StepLogger:
+class StepLogger:
     def __init__(self) -> None:
         self.steps: list[StepLog] = []
 
@@ -41,7 +46,7 @@ class _StepLogger:
         kind: str = "text",
     ) -> StepLog:
         payload = data or {}
-        inferred = _infer_kind(payload)
+        inferred = infer_step_kind(payload)
         if kind == "text" and inferred != "text":
             kind = inferred
         step = StepLog(
@@ -50,13 +55,28 @@ class _StepLogger:
             description=description,
             data=payload,
             level=level,
-            kind=kind or _infer_kind(payload),
+            kind=kind or infer_step_kind(payload),
         )
         self.steps.append(step)
         return step
 
+    def add_table(
+        self,
+        title: str,
+        headers: list[Any],
+        rows: list[Any],
+        alignments: list[str] | None = None,
+        description: str = "",
+        level: str = "INFO",
+        **extra: Any,
+    ) -> StepLog:
+        data: dict[str, Any] = {"headers": headers, "rows": rows, **extra}
+        if alignments is not None:
+            data["alignments"] = alignments
+        return self.add(title, description, data, level)
 
-def _infer_kind(data: dict[str, Any]) -> str:
+
+def infer_step_kind(data: dict[str, Any]) -> str:
     if data.get("headers") is not None and data.get("rows") is not None:
         return "table"
     candidates = data.get("candidates")
