@@ -22,7 +22,7 @@
   "rough_set": "Tập thô",
   "id3": "ID3",
   "cart_gini": "CART (Gini)",
-  "naive_bayes": "Naïve Bayes (Cổ điển)",
+  "naive_bayes": "Naïve Bayes (Không làm trơn)",
   "naive_bayes_laplace": "Naïve Bayes (Laplace)",
   "kmeans": "K-Means",
   "run": "▶ Chạy",

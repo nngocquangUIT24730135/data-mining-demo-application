@@ -165,7 +165,7 @@ class ConsoleFormatter:
         return table + (("\n" + extra) if extra else "")
 
     def render_prediction(self, label: str, explanation: str) -> str:
-        box_inner = f"  Kết quả: {label}  "
+        box_inner = f"  Dự đoán: {label}  "
         width = max(display_width(box_inner), 28)
         top = "┌" + "─" * width + "┐"
         mid = "│" + pad_display(box_inner, width, "left") + "│"
@@ -214,6 +214,11 @@ class ConsoleFormatter:
         return "\n".join(chunks).rstrip() + "\n"
 
     def _summary_box(self, summary: str) -> str:
+        stripped = summary.strip()
+        # Multi-line pedagogical summaries (NB conclusion, framed boxes) keep their layout.
+        line_count = len([line for line in stripped.splitlines() if line.strip()])
+        if line_count > 3 or any(marker in stripped for marker in ("╔", "┌", "║", "①", "②", "③", "→", "──")):
+            return stripped
         lines = [line.strip() for line in summary.replace(". ", ".\n").splitlines() if line.strip()]
         if not lines:
             lines = [summary]
@@ -362,6 +367,8 @@ def _pseudo_key(algorithm_name: str) -> str:
         "naive_bayes": "naive_bayes",
         "naive_bayes_(co_dien)": "naive_bayes",
         "naive_bayes_(classic)": "naive_bayes",
+        "naive_bayes_(khong_lam_tron)": "naive_bayes",
+        "naive_bayes_(no_smoothing)": "naive_bayes",
         "naive_bayes_(laplace)": "naive_bayes_laplace",
         "naive_bayes_laplace": "naive_bayes_laplace",
     }

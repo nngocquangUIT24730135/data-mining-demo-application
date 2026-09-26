@@ -5,13 +5,15 @@ import tkinter as tk
 from tkinter import ttk
 
 from datamining_app.algorithms.pseudocode import PSEUDOCODE
-from datamining_app.console.tags import CONSOLE_BG, CONSOLE_FG, ensure_console_font
+from datamining_app.console.tags import ensure_console_font
 from datamining_app.i18n import i18n
+from datamining_app.ui.theme import COLOR_BORDER, COLOR_PRIMARY, COLOR_SELECT, COLOR_TEXT
 from datamining_app.ui.windowing import enable_maximize
 
-KEYWORD_COLOR = "#38BDF8"
-STEP_COLOR = "#FBBF24"
-FORMULA_COLOR = "#FDBA74"
+KEYWORD_COLOR = COLOR_PRIMARY
+STEP_COLOR = "#9A6700"
+FORMULA_COLOR = "#BC4C00"
+CODE_BG = "#FFFFFF"
 
 _DECLARATION = re.compile(r"^\s*(ALGORITHM|INPUT|OUTPUT)\b")
 _STEP = re.compile(r"Bước\s+\d+[a-zA-Z]?(?:\s*\[[^\]]*\])?")
@@ -50,15 +52,16 @@ class PseudocodeDialog(tk.Toplevel):
         self.geometry("760x580")
         self.minsize(480, 360)
         self.transient(master)
-        self.configure(bg=CONSOLE_BG)
+        surface = ttk.Style(self).lookup("TFrame", "background") or "#F6F8FA"
+        self.configure(bg=surface)
         enable_maximize(self)
         family = ensure_console_font(self)
         mono = (family, 13)
         mono_bold = (family, 13, "bold")
 
         source = PSEUDOCODE.get(algorithm_key, "Chưa có mã giả.")
-        host = tk.Frame(self, bg=CONSOLE_BG)
-        host.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+        host = ttk.Frame(self, padding=(12, 12, 12, 4))
+        host.pack(fill="both", expand=True)
         host.grid_rowconfigure(0, weight=1)
         host.grid_columnconfigure(0, weight=1)
 
@@ -66,9 +69,14 @@ class PseudocodeDialog(tk.Toplevel):
             host,
             wrap="none",
             font=mono,
-            bg=CONSOLE_BG,
-            fg=CONSOLE_FG,
-            insertbackground=CONSOLE_FG,
+            bg=CODE_BG,
+            fg=COLOR_TEXT,
+            insertbackground=COLOR_TEXT,
+            selectbackground=COLOR_SELECT,
+            selectforeground=COLOR_TEXT,
+            highlightthickness=1,
+            highlightbackground=COLOR_BORDER,
+            highlightcolor=COLOR_PRIMARY,
             relief="flat",
             borderwidth=0,
             padx=10,
@@ -82,28 +90,16 @@ class PseudocodeDialog(tk.Toplevel):
         yscroll.grid(row=0, column=1, sticky="ns")
         xscroll.grid(row=1, column=0, sticky="ew")
 
-        box.tag_configure("code", foreground=CONSOLE_FG)
+        box.tag_configure("code", foreground=COLOR_TEXT)
         box.tag_configure("keyword", foreground=KEYWORD_COLOR, font=mono_bold)
         box.tag_configure("step", foreground=STEP_COLOR, font=mono_bold)
         box.tag_configure("formula", foreground=FORMULA_COLOR)
         fill_pseudocode(box, source)
         box.configure(state="disabled")
 
-        footer = tk.Frame(self, bg=CONSOLE_BG)
-        footer.pack(fill="x", padx=8, pady=(0, 10))
-        tk.Button(
-            footer,
-            text=i18n.t("close"),
-            command=self.destroy,
-            bg="#21262D",
-            fg=CONSOLE_FG,
-            activebackground="#30363D",
-            activeforeground="#FFFFFF",
-            relief="flat",
-            font=("Segoe UI", 10),
-            padx=14,
-            pady=4,
-        ).pack(side="right")
+        footer = ttk.Frame(self, padding=(12, 0, 12, 12))
+        footer.pack(fill="x")
+        ttk.Button(footer, text=i18n.t("close"), command=self.destroy).pack(side="right")
 
 
 def fill_pseudocode(box: tk.Text, source: str) -> None:

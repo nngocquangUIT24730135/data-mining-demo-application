@@ -79,10 +79,10 @@ PSEUDOCODE: dict[str, str] = {
        NGƯỢC LẠI → Thêm nhánh: ID3(Sᵥ, Attributes \\ {A*}, Target)
   Bước 8: Trả về cây quyết định T
 """,
-    "naive_bayes": """ALGORITHM NAIVE-BAYES-CLASSIC(D, Target)
+    "naive_bayes": """ALGORITHM NAIVE-BAYES-NO-SMOOTHING(D, Target)
   INPUT  : D — tập huấn luyện
            Target — thuộc tính lớp
-  OUTPUT : Mô hình P(C), P(xᵢ | C)  (không làm mịn)
+  OUTPUT : Mô hình P(C), P(xᵢ | C)  (không làm trơn)
 
   Bước 1: VỚI mỗi lớp C:
        P(C) ← |D_C| / |D|          // tiên nghiệm

@@ -22,7 +22,7 @@
   "rough_set": "Rough Set",
   "id3": "ID3",
   "cart_gini": "CART (Gini)",
-  "naive_bayes": "Naïve Bayes (Classic)",
+  "naive_bayes": "Naïve Bayes (No smoothing)",
   "naive_bayes_laplace": "Naïve Bayes (Laplace)",
   "kmeans": "K-Means",
   "run": "▶ Run",

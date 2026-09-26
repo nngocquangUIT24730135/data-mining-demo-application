@@ -184,22 +184,22 @@ REGISTRY: list[dict[str, Any]] = [
     {
         "algorithm": "naive_bayes",
         "table_name": "id3_buy_computer",
-        "display_name": "Mua máy tính AllElectronics — NB cổ điển (14 mẫu)",
-        "description": "Cùng bảng ID3 AllElectronics, Naïve Bayes cổ điển (không làm mịn) dự đoán buys_computer.",
+        "display_name": "Mua máy tính AllElectronics — NB không làm trơn (14 mẫu)",
+        "description": "Cùng bảng ID3 AllElectronics, Naïve Bayes không làm trơn dự đoán buys_computer.",
         "default_config": {"decision_attr": "buys_computer"},
     },
     {
         "algorithm": "naive_bayes",
         "table_name": "id3_weather_play",
-        "display_name": "Dự báo thời tiết — NB cổ điển (14 ngày)",
-        "description": "Cùng bảng ID3 thời tiết, Naïve Bayes cổ điển (không làm mịn) dự đoán Play.",
+        "display_name": "Dự báo thời tiết — NB không làm trơn (14 ngày)",
+        "description": "Cùng bảng ID3 thời tiết, Naïve Bayes không làm trơn dự đoán Play.",
         "default_config": {"decision_attr": "Play"},
     },
     {
         "algorithm": "naive_bayes",
         "table_name": "nb_buy_mobile",
-        "display_name": "Dự đoán mua điện thoại — NB cổ điển (14 khách)",
-        "description": "14 khách hàng — Naïve Bayes cổ điển (không làm mịn) dự đoán buy_mobile.",
+        "display_name": "Dự đoán mua điện thoại — NB không làm trơn (14 khách)",
+        "description": "14 khách hàng — Naïve Bayes không làm trơn dự đoán buy_mobile.",
         "default_config": {"decision_attr": "buy_mobile"},
     },
     {
