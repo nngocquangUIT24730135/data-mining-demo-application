@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import math
 from collections import Counter
 from typing import Any
 
@@ -12,9 +11,9 @@ from datamining_app.core.models import AlgorithmResult, Dataset, ParamDef, Predi
 from datamining_app.fmt import fmt_score, fmt_score_diff
 
 
-class ID3Algorithm(BaseAlgorithm):
-    name = "ID3"
-    description = "Xây dựng cây quyết định theo Information Gain."
+class CARTGiniAlgorithm(BaseAlgorithm):
+    name = "CART (Gini Index)"
+    description = "Xây dựng cây quyết định theo tiêu chí Gini Impurity."
     supports_predict = True
     supports_visualization = True
     param_schema = {
@@ -56,9 +55,9 @@ class ID3Algorithm(BaseAlgorithm):
 
         log = self._new_logger()
         counts = Counter(r[decision] for r in rows)
-        info_d = entropy(rows, decision)
-        step_builder = _ID3Steps(log, len(rows), dict(counts))
-        step_builder.initial_entropy_step(rows, decision, info_d, counts)
+        gini_s = gini_impurity(rows, decision)
+        step_builder = _CARTSteps(log, len(rows), dict(counts))
+        step_builder.initial_gini_step(rows, decision, gini_s, counts)
 
         tree = self._build(rows, features, decision, max_depth, 0, step_builder, "Gốc")
         self._tree = tree
@@ -67,8 +66,8 @@ class ID3Algorithm(BaseAlgorithm):
 
         rules = extract_tree_rules(tree)
         summary = (
-            f"Cây ID3 gốc = '{tree.get('attribute', tree.get('label'))}'. "
-            f"I(S) = {fmt_score(info_d)}. Độ sâu tối đa cho phép = {max_depth}."
+            f"Cây CART (Gini) gốc = '{tree.get('attribute', tree.get('label'))}'. "
+            f"G(S) = {fmt_score(gini_s)}. Độ sâu tối đa = {max_depth}."
         )
         result = AlgorithmResult(
             algorithm_name=self.name,
@@ -78,7 +77,7 @@ class ID3Algorithm(BaseAlgorithm):
                 "tree": tree,
                 "features": features,
                 "decision": decision,
-                "entropy": info_d,
+                "gini": gini_s,
                 "class_counts": dict(counts),
                 "n_rows": len(rows),
                 "rules": rules,
@@ -95,7 +94,7 @@ class ID3Algorithm(BaseAlgorithm):
         decision: str,
         max_depth: int,
         depth: int,
-        step_builder: _ID3Steps,
+        step_builder: "_CARTSteps",
         path: str,
     ) -> dict[str, Any]:
         counts = Counter(r[decision] for r in rows)
@@ -120,18 +119,19 @@ class ID3Algorithm(BaseAlgorithm):
             step_builder.leaf_step(path, majority, counts, node, stop_reason, max_depth)
             return node
 
-        info_d = entropy(rows, decision)
-        gains = []
+        gini_s = gini_impurity(rows, decision)
+        scores: list[tuple[str, float, float]] = []
         for feat in features:
-            split_info, gain = information_gain(rows, feat, decision, info_d)
-            gains.append((feat, gain, split_info))
-        gains.sort(key=lambda x: -x[1])
-        best, best_gain, _ = gains[0]
+            gini_a, delta = gini_gain(rows, feat, decision, gini_s)
+            scores.append((feat, delta, gini_a))
+        scores.sort(key=lambda x: -x[1])
+        best, best_delta, _ = scores[0]
         values = sorted({r[best] for r in rows})
         split_node = {
             "is_leaf": False,
             "attribute": best,
-            "gain": best_gain,
+            "gain": best_delta,
+            "delta_gini": best_delta,
             "samples": len(rows),
             "class_counts": dict(counts),
             "path": path,
@@ -147,27 +147,41 @@ class ID3Algorithm(BaseAlgorithm):
                 for value in values
             },
         }
-        step_builder.gain_step(path, rows, decision, info_d, gains, best, split_node)
+        step_builder.split_step(path, rows, decision, gini_s, scores, best, split_node)
         remaining = [f for f in features if f != best]
         children = {}
         for value in values:
             subset = [r for r in rows if r[best] == value]
             children[value] = self._build(
-                subset, remaining, decision, max_depth, depth + 1, step_builder, f"{path} / {best}={value}"
+                subset,
+                remaining,
+                decision,
+                max_depth,
+                depth + 1,
+                step_builder,
+                f"{path} / {best}={value}",
             )
-        node.update({"is_leaf": False, "attribute": best, "gain": best_gain, "children": children})
+        node.update(
+            {
+                "is_leaf": False,
+                "attribute": best,
+                "gain": best_delta,
+                "delta_gini": best_delta,
+                "children": children,
+            }
+        )
         return node
 
     def predict(self, sample: dict[str, Any]) -> PredictResult:
         if not self._trained or self._tree is None:
-            raise ValueError("Chưa huấn luyện cây ID3.")
-        return predict_on_tree(self._tree, sample, algo_name="cây ID3")
+            raise ValueError("Chưa huấn luyện cây CART.")
+        return predict_on_tree(self._tree, sample, algo_name="cây CART (Gini)")
 
 
-class _ID3Steps:
+class _CARTSteps:
     def __init__(self, log: StepLogger, n_rows: int, class_counts: dict[str, int]) -> None:
         self._log = log
-        self._gain_explained = False
+        self._split_explained = False
         self._growing: dict[str, Any] = {
             "is_leaf": False,
             "attribute": "S",
@@ -178,37 +192,32 @@ class _ID3Steps:
             "path": "Gốc",
         }
 
-    def initial_entropy_step(
+    def initial_gini_step(
         self,
         rows: list[dict[str, str]],
         decision: str,
-        info_d: float,
+        gini_s: float,
         counts: Counter,
     ) -> None:
         class_rows = [[label, count] for label, count in counts.items()]
         n = len(rows)
-        dist = ", ".join(f"{v} {k}" for k, v in counts.items())
-        terms = " - ".join(f"({c}/{n})×log₂({c}/{n})" for c in counts.values())
+        terms = " + ".join(f"({c}/{n})²" for c in counts.values())
         description = (
-            "① Ý tưởng cốt lõi của ID3:\n"
-            "  Xây cây quyết định bằng cách liên tục chọn thuộc tính\n"
-            '  "phân loại tốt nhất" (Information Gain cao nhất) làm\n'
-            "  nút phân nhánh, cho đến khi tất cả lá thuần hoặc hết tài nguyên.\n"
+            "① Ý tưởng CART:\n"
+            "   Chọn thuộc tính giảm Gini Impurity nhiều nhất ở mỗi nút.\n"
             "\n"
-            "② Entropy I(S) — đo độ hỗn loạn (tạp chất) của tập dữ liệu:\n"
-            "  I(S) = -Σ pᵢ × log₂(pᵢ)\n"
-            "  → = 0 bit: tập thuần (chỉ 1 lớp) — lý tưởng nhất\n"
-            "  → = 1 bit: tập 50/50 (2 lớp đều nhau) — hỗn loạn nhất\n"
-            "  → Càng cao → càng cần phân loại thêm.\n"
+            "② Gini Index G(S):\n"
+            "   G(S) = 1 - Σ pᵢ² = xác suất phân loại sai khi đoán ngẫu nhiên.\n"
+            "   → = 0: tập thuần / ≈ 0.5: hỗn loạn tối đa (2 lớp đều nhau)\n"
             "\n"
-            f"  |S| = {n} mẫu → {dist}\n"
-            f"  I(S) = -{terms} = {fmt_score(info_d)} bit"
+            "③ Tính G(S) gốc:\n"
+            f"   G(S) = 1 - ({terms}) = {fmt_score(gini_s)}"
         )
         self._log.add(
-            "Tính Entropy I(S) — nút Gốc",
+            "Tính Gini G(S) — nút Gốc",
             description,
             {
-                "entropy": info_d,
+                "gini": gini_s,
                 "class_counts": dict(counts),
                 "rows": class_rows,
                 "headers": ["Lớp", "Số mẫu"],
@@ -217,7 +226,7 @@ class _ID3Steps:
                 "sample_rows": rows,
                 "path": "Gốc",
                 "tree": copy.deepcopy(self._growing),
-                "conclusion": f"  → I(S) = {fmt_score(info_d)} bit",
+                "conclusion": f"  → G(S) = {fmt_score(gini_s)}",
             },
             "STEP_HEADER",
         )
@@ -231,7 +240,7 @@ class _ID3Steps:
     ) -> None:
         counts = Counter(r[decision] for r in rows)
         n = len(rows)
-        info_s = entropy(rows, decision)
+        g_s = gini_impurity(rows, decision)
         branch = _branch_from_path(path)
         if branch:
             attr, value = branch
@@ -258,12 +267,12 @@ class _ID3Steps:
             label = next(iter(counts))
             conclusion = (
                 f"  ① Điều kiện dừng — Tập thuần (Bước 2 mã giả):\n"
-                f'    Tất cả mẫu có {decision} = "{label}" → I(S) = {fmt_score(info_s)}\n'
+                f'    Tất cả mẫu có {decision} = "{label}" → G(S) = {fmt_score(g_s)}\n'
                 f"    → Tạo nút lá ngay: {decision} = {label}."
             )
         else:
             conclusion = (
-                f"  → Tập chưa thuần khiết (Entropy I(S) = {fmt_score(info_s)} bit)\n"
+                f"  → Tập chưa thuần khiết (Gini G(S) = {fmt_score(g_s)})\n"
                 f"  → [Mã giả Bước 4] Đánh giá các thuộc tính còn lại trên tập {n} mẫu này:"
             )
 
@@ -294,24 +303,21 @@ class _ID3Steps:
             title = f"Lá — {path} (tập thuần)"
             description = (
                 "① Điều kiện dừng — Tập thuần (Bước 2 mã giả):\n"
-                f"  Tất cả {sum(counts.values())} mẫu đều cùng lớp \"{majority}\" → I(S) = 0\n"
-                "  → Gán lá ngay, không cần tính thêm.\n"
+                f"  Tất cả {sum(counts.values())} mẫu cùng lớp \"{majority}\" → G(S) = 0\n"
                 f"  → Lá = {majority}"
             )
         elif stop_reason == "no_attrs":
             title = f"Lá — {path} (hết thuộc tính)"
             description = (
                 "① Điều kiện dừng — Hết thuộc tính (Bước 3 mã giả):\n"
-                "  Không còn thuộc tính để phân nhánh tiếp.\n"
-                "  → Gán lớp đa số trong tập hiện tại.\n"
+                "  Không còn thuộc tính để phân nhánh.\n"
                 f"  → Lá = {majority} ({self._fmt_counts(counts)})"
             )
         else:
             title = f"Lá — {path} (đạt max_depth={max_depth})"
             description = (
-                "① Điều kiện dừng — Giới hạn độ sâu (ràng buộc kỹ thuật):\n"
-                f"  Độ sâu đã đạt max_depth={max_depth} → dừng để tránh overfitting.\n"
-                "  → Gán lớp đa số.\n"
+                f"① Điều kiện dừng — Đạt max_depth={max_depth}:\n"
+                "  Giới hạn độ sâu để tránh overfitting.\n"
                 f"  → Lá = {majority} ({self._fmt_counts(counts)})"
             )
         self._log.add(
@@ -328,77 +334,74 @@ class _ID3Steps:
             "SUCCESS",
         )
 
-    def gain_step(
+    def split_step(
         self,
         path: str,
         rows: list[dict[str, str]],
         decision: str,
-        info_d: float,
-        gains: list[tuple[str, float, float]],
+        gini_s: float,
+        scores: list[tuple[str, float, float]],
         best: str,
         split_node: dict[str, Any],
     ) -> None:
-        best_split = next(split for feat, _, split in gains if feat == best)
+        best_gini_a = next(gini_a for feat, _, gini_a in scores if feat == best)
         values = sorted({r[best] for r in rows})
         self._place_node(path, split_node)
-        calc = self._format_gains(rows, decision, info_d, gains, best)
-        if not self._gain_explained:
-            self._gain_explained = True
+        calc = self._format_scores(rows, decision, gini_s, scores, best)
+        if not self._split_explained:
+            self._split_explained = True
             description = (
-                "[Mã giả Bước 4] VỚI mỗi A ∈ Attributes: tính Gain(A,S) = I(S) - E(A,S)\n"
-                "[Mã giả Bước 5] A* ← argmax Gain(A,S)\n"
+                "[Mã giả Bước 4] VỚI mỗi A ∈ Attributes: tính ΔGini(A) = G(S) - G(A,S)\n"
+                "[Mã giả Bước 5] A* ← argmax ΔGini(A)\n"
                 "\n"
-                "① Information Gain là gì?\n"
-                "  Gain(A) = mức giảm Entropy khi biết thêm thuộc tính A.\n"
-                "  → Gain càng cao → A phân loại càng hiệu quả.\n"
+                "① ΔGini(A) = mức giảm Gini khi chia theo A.\n"
+                "  → ΔGini càng lớn → A phân loại càng hiệu quả.\n"
                 "\n"
-                "② E(A,S) — Entropy trung bình sau khi chia theo A:\n"
-                "  E(A,S) = Σᵥ (|Sᵥ|/|S|) × I(Sᵥ)\n"
-                "  → Trung bình Entropy của các tập con sau khi chia theo A.\n"
+                "② G(A,S) — Gini trung bình sau khi chia:\n"
+                "  G(A,S) = Σᵥ (|Sᵥ|/|S|) × G(Sᵥ)\n"
                 f"\n{calc}"
             )
         else:
             description = (
-                f"[Mã giả Bước 4] Đánh giá Gain — nút {path}\n"
-                f"[Mã giả Bước 5] Chọn A* có Gain lớn nhất\n"
+                f"[Mã giả Bước 4] Đánh giá ΔGini — nút {path}\n"
+                f"[Mã giả Bước 5] Chọn A* có ΔGini lớn nhất\n"
                 f"\n{calc}"
             )
         self._log.add(
-            f"Chọn thuộc tính phân nhánh — {path}",
+            f"Chọn thuộc tính theo ΔGini — {path}",
             description,
             {
-                "gains": [{"feature": f, "gain": g, "info": s} for f, g, s in gains],
+                "gains": [{"feature": f, "gain": d, "info": g} for f, d, g in scores],
                 "chosen": best,
-                "entropy": info_d,
+                "gini": gini_s,
                 "path": path,
                 "split_values": values,
                 "headers": [
                     "Thuộc tính xem xét\nphân nhánh",
-                    "Entropy tập dữ liệu\ntrước khi chia I(S)",
-                    "Entropy trung bình\nsau khi chia E(A, S)",
-                    "Mức tăng thông tin\nInformation Gain",
+                    "Chỉ số Gini\ntrước khi chia G(S)",
+                    "Chỉ số Gini trung bình\nsau khi chia G(A, S)",
+                    "Mức giảm chỉ số Gini\nGini Gain (ΔG)",
                 ],
                 "rows": [
                     [
                         feat,
-                        fmt_score(info_d),
-                        fmt_score(split),
-                        fmt_score_diff(info_d, split) + (" ★" if feat == best else ""),
+                        fmt_score(gini_s),
+                        fmt_score(gini_a),
+                        fmt_score_diff(gini_s, gini_a) + (" ★" if feat == best else ""),
                     ]
-                    for feat, gain, split in gains
+                    for feat, delta, gini_a in scores
                 ],
                 "alignments": ["left", "right", "right", "right"],
                 "tree": copy.deepcopy(self._growing),
                 "conclusion": (
-                    f'  → [Mã giả Bước 5] Chọn A* = "{best}" làm nút '
-                    f"(Gain = {fmt_score_diff(info_d, best_split)} ★)"
+                    f'  → [Mã giả Bước 5] Chọn A* = "{best}" '
+                    f"(ΔGini = {fmt_score_diff(gini_s, best_gini_a)} ★)"
                 ),
             },
             "SUCCESS",
         )
 
     def _place_node(self, path: str, node: dict[str, Any]) -> None:
-        """Insert/replace a node on the growing visualization tree (DFS snapshots)."""
         if path == "Gốc" or not path:
             self._growing.clear()
             self._growing.update(copy.deepcopy(node))
@@ -422,19 +425,19 @@ class _ID3Steps:
         return ", ".join(f"{k}: {v}" for k, v in counts.items())
 
     @staticmethod
-    def _format_gains(
+    def _format_scores(
         rows: list[dict[str, str]],
         decision: str,
-        info_d: float,
-        gains: list[tuple[str, float, float]],
+        gini_s: float,
+        scores: list[tuple[str, float, float]],
         best: str,
     ) -> str:
         n = len(rows)
         blocks: list[str] = []
-        for feat, gain, split in gains:
+        for feat, delta, gini_a in scores:
             blocks.append(
-                _format_feature_entropy_block(
-                    rows, decision, info_d, feat, gain, split, n, starred=(feat == best)
+                _format_feature_gini_block(
+                    rows, decision, gini_s, feat, delta, gini_a, n, starred=(feat == best)
                 )
             )
         return "\n".join(blocks)
@@ -455,37 +458,37 @@ def _branch_from_path(path: str) -> tuple[str, str] | None:
     return attr.strip(), value.strip().strip("'\"")
 
 
-def _format_entropy_trace(
+def _format_gini_trace(
     subset: list[dict[str, str]],
     decision: str,
     parent_n: int,
     feature: str,
     value: str,
 ) -> tuple[str, float]:
-    """I(v): fraction formula → float64 result (no intermediate decimals)."""
+    """G(v): fraction formula → float64 result (no intermediate decimals)."""
     m = len(subset)
     counts = Counter(r[decision] for r in subset)
-    e = entropy(subset, decision)
+    g = gini_impurity(subset, decision)
     lines = [
         f"  [ Nhánh: {feature} = {value} ] ({m}/{parent_n} mẫu)"
         f" → Phân phối nhãn: {_label_dist(counts)}"
     ]
     if m == 0:
-        lines.append(f"    I({value}) = {fmt_score(0.0)}  (nhánh rỗng)")
+        lines.append(f"    G({value}) = {fmt_score(0.0)}  (nhánh rỗng)")
         return "\n".join(lines), 0.0
 
-    formula_parts = [f"({counts[label]}/{m}) × log₂({counts[label]}/{m})" for label in sorted(counts)]
-    lines.append(f"    I({value}) = -{' - '.join(formula_parts)} = {fmt_score(e)}")
-    return "\n".join(lines), e
+    formula_parts = [f"({counts[label]}/{m})²" for label in sorted(counts)]
+    lines.append(f"    G({value}) = 1 - {' - '.join(formula_parts)} = {fmt_score(g)}")
+    return "\n".join(lines), g
 
 
-def _format_feature_entropy_block(
+def _format_feature_gini_block(
     rows: list[dict[str, str]],
     decision: str,
-    info_d: float,
+    gini_s: float,
     feat: str,
-    gain: float,
-    split: float,
+    delta: float,
+    gini_a: float,
     n: int,
     *,
     starred: bool = False,
@@ -495,45 +498,44 @@ def _format_feature_entropy_block(
     branch_vals: list[tuple[str, int, float]] = []
     for value in sorted({r[feat] for r in rows}):
         subset = [r for r in rows if r[feat] == value]
-        block, e_v = _format_entropy_trace(subset, decision, n, feat, value)
+        block, g_v = _format_gini_trace(subset, decision, n, feat, value)
         lines.append(block)
         lines.append("")
-        branch_vals.append((value, len(subset), e_v))
+        branch_vals.append((value, len(subset), g_v))
 
-    # Fraction weights + I(v) symbols only — no rounded-decimal substitution.
-    weighted_sym = " + ".join(f"({m}/{n}) × I({v})" for v, m, _ in branch_vals)
-    e_as = fmt_score(split)
-    gain_txt = fmt_score_diff(info_d, split)
+    # Fraction weights + G(v) symbols only — no rounded-decimal substitution.
+    weighted_sym = " + ".join(f"({m}/{n}) × G({v})" for v, m, _ in branch_vals)
+    g_as = fmt_score(gini_a)
+    delta_txt = fmt_score_diff(gini_s, gini_a)
     star = "  ★" if starred else ""
 
-    lines.append(f"  Entropy trung bình sau khi chia theo {feat}:")
-    lines.append(f"    E({feat}, S) = {weighted_sym} = {e_as}")
+    lines.append(f"  Chỉ số Gini trung bình sau khi chia theo {feat}:")
+    lines.append(f"    G({feat}, S) = {weighted_sym} = {g_as}")
     lines.append("")
-    lines.append("  Mức tăng thông tin thu được:")
-    lines.append(f"    Gain({feat}) = I(S) - E({feat}, S) = {gain_txt}{star}")
+    lines.append("  Mức giảm chỉ số Gini thu được:")
+    lines.append(f"    ΔGini({feat}) = G(S) - G({feat}, S) = {delta_txt}{star}")
     lines.append("")
     return "\n".join(lines)
 
 
-def entropy(rows: list[dict[str, str]], decision: str) -> float:
+def gini_impurity(rows: list[dict[str, str]], decision: str) -> float:
     n = len(rows)
     if n == 0:
         return 0.0
     counts = Counter(r[decision] for r in rows)
-    total = 0.0
-    for count in counts.values():
-        p = count / n
-        if p > 0:
-            total -= p * math.log2(p)
-    return total
+    return 1.0 - sum((count / n) ** 2 for count in counts.values())
 
 
-def information_gain(
-    rows: list[dict[str, str]], feature: str, decision: str, info_d: float
+def gini_gain(
+    rows: list[dict[str, str]],
+    feature: str,
+    decision: str,
+    gini_s: float,
 ) -> tuple[float, float]:
+    """Return (Gini_A(S), ΔGini(A))."""
     n = len(rows)
-    split = 0.0
+    weighted = 0.0
     for value in {r[feature] for r in rows}:
         subset = [r for r in rows if r[feature] == value]
-        split += (len(subset) / n) * entropy(subset, decision)
-    return split, info_d - split
+        weighted += (len(subset) / n) * gini_impurity(subset, decision)
+    return weighted, gini_s - weighted

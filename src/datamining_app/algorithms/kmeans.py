@@ -6,6 +6,13 @@ from typing import Any
 from datamining_app.algorithms.base import BaseAlgorithm, StepLogger
 from datamining_app.algorithms.dataset_utils import excluded_headers, to_float
 from datamining_app.core.models import AlgorithmResult, Dataset, ParamDef, PredictResult
+from datamining_app.fmt import fmt_centroid, fmt_dist, fmt_inertia
+
+# Hard caps so the desktop demo always terminates in reasonable time.
+MAX_K = 20
+MAX_ITER_CAP = 50
+MAX_POINTS = 500
+_INTERNAL_SEED = 42
 
 
 class KMeansAlgorithm(BaseAlgorithm):
@@ -18,7 +25,7 @@ class KMeansAlgorithm(BaseAlgorithm):
             type="int",
             default=3,
             min=2,
-            max=20,
+            max=MAX_K,
             step=1,
             label_vi="Số cụm (K)",
             label_en="Number of clusters (K)",
@@ -27,7 +34,7 @@ class KMeansAlgorithm(BaseAlgorithm):
             type="int",
             default=20,
             min=1,
-            max=100,
+            max=MAX_ITER_CAP,
             step=1,
             label_vi="Số vòng lặp tối đa",
             label_en="Maximum iterations",
@@ -41,32 +48,10 @@ class KMeansAlgorithm(BaseAlgorithm):
         ),
         "init": ParamDef(
             type="radio",
-            options=["random", "first_k", "manual"],
-            default="first_k",
+            options=["random"],
+            default="random",
             label_vi="Khởi tạo trọng tâm",
             label_en="Centroid initialization",
-        ),
-        "feature_cols": ParamDef(
-            type="multiselect",
-            options="headers",
-            default=[],
-            label_vi="Cột đặc trưng số (để trống = tự chọn)",
-            label_en="Numeric feature columns (empty = auto)",
-        ),
-        "random_seed": ParamDef(
-            type="int",
-            default=42,
-            min=0,
-            max=9999,
-            step=1,
-            label_vi="Hạt giống ngẫu nhiên (init)",
-            label_en="Random seed (init)",
-        ),
-        "init_ids": ParamDef(
-            type="str",
-            default="",
-            label_vi="Tâm theo id (phẩy; dùng với init=manual)",
-            label_en="Centroid ids (comma; with init=manual)",
         ),
     }
 
@@ -79,40 +64,46 @@ class KMeansAlgorithm(BaseAlgorithm):
 
     def run(self, dataset: Dataset, params: dict[str, Any]) -> AlgorithmResult:
         headers = excluded_headers(dataset, params)
-        requested = [c for c in (params.get("feature_cols") or []) if c in headers]
-        features = requested or [
+        features = [
             h for h in headers if all(to_float(v) is not None for v in dataset.column_values(h))
         ]
         if len(features) < 1:
             raise ValueError("K-Means cần ít nhất một cột số.")
-        k = int(params.get("k", 3))
-        max_iter = int(params.get("max_iter", 20))
-        metric = str(params.get("distance", "euclidean"))
-        seed = int(params.get("random_seed", 42))
+
+        k = max(2, min(int(params.get("k", 3)), MAX_K))
+        max_iter = max(1, min(int(params.get("max_iter", 20)), MAX_ITER_CAP))
+        metric = str(params.get("distance", "euclidean")).strip().lower()
+        if metric not in {"euclidean", "manhattan"}:
+            metric = "euclidean"
+        init_mode = "random"
 
         points = []
         for i, row in enumerate(dataset.rows):
+            if len(points) >= MAX_POINTS:
+                break
             vec = [to_float(row.get(f)) for f in features]
             if any(v is None for v in vec):
                 continue
             label = _point_id(row, i)
             points.append({"id": label, "vector": vec, "row": row})
         if len(points) < k:
-            raise ValueError(f"Cần ít nhất K={k} điểm dữ liệu.")
+            raise ValueError(f"Cần ít nhất K={k} điểm dữ liệu (có {len(points)} điểm hợp lệ).")
+        k = min(k, len(points))
 
-        rng = random.Random(seed)
-        centroids, init_note = _initial_centroids(points, k, params, rng)
+        rng = random.Random(_INTERNAL_SEED)
+        centroids, init_ids = _initial_centroids(points, k, rng)
 
         log = self._new_logger()
         formula = (
             "d(x,y) = √(Σ (xᵢ-yᵢ)²)" if metric == "euclidean" else "d(x,y) = Σ |xᵢ-yᵢ|"
         )
         steps = _KMeansSteps(log)
-        steps.init_step(k, metric, max_iter, seed, features, centroids, formula, init_note)
+        steps.init_step(k, metric, max_iter, features, centroids, formula, init_ids)
 
         history = []
         assignments: list[int] = []
-        sse_prev = None
+        inertia_prev = None
+        converged = False
         for iteration in range(1, max_iter + 1):
             assignments = []
             clusters: list[list[int]] = [[] for _ in range(k)]
@@ -126,11 +117,7 @@ class KMeansAlgorithm(BaseAlgorithm):
                     {"id": point["id"], "distances": distances, "cluster": cluster + 1}
                 )
 
-            sse = 0.0
-            for idx, point in enumerate(points):
-                sse += _distance(point["vector"], centroids[assignments[idx]], metric) ** (
-                    2 if metric == "euclidean" else 1
-                )
+            inertia, inertia_label = _compute_inertia(points, centroids, assignments, metric)
 
             new_centroids = []
             for j in range(k):
@@ -150,29 +137,37 @@ class KMeansAlgorithm(BaseAlgorithm):
                     old_c = prev_assign[idx]
                     new_c = cluster + 1
                     if old_c != new_c:
-                        changed.append(f"{points[idx]['id']}: C{old_c} → C{new_c}")
+                        changed.append(f"{points[idx]['id']} (C{old_c} → C{new_c})")
             snap = {
                 "iteration": iteration,
                 "centroids": [list(c) for c in centroids],
                 "new_centroids": [list(c) for c in new_centroids],
                 "assignments": [a + 1 for a in assignments],
-                "sse": sse,
+                "sse": inertia,
+                "inertia": inertia,
+                "inertia_label": inertia_label,
                 "clusters": [[points[i]["id"] for i in members] for members in clusters],
                 "distances": dist_rows,
                 "changed": changed,
             }
             history.append(snap)
             steps.assign_step(iteration, snap, points, k)
-            steps.update_step(iteration, snap, centroids, new_centroids, sse)
+            steps.update_step(iteration, snap, centroids, new_centroids, inertia, inertia_label)
 
-            converged = _same_centroids(centroids, new_centroids)
+            same_centroids = _same_centroids(centroids, new_centroids)
             centroids = new_centroids
-            if sse_prev is not None and sse > sse_prev + 1e-9:
-                steps.sse_warning_step(iteration, sse, sse_prev)
-            sse_prev = sse
-            if converged:
-                steps.convergence_step(iteration, sse)
+            if inertia_prev is not None and inertia > inertia_prev + 1e-9:
+                steps.inertia_warning_step(iteration, inertia, inertia_prev, inertia_label)
+            inertia_prev = inertia
+            if same_centroids or not changed and iteration > 1:
+                converged = True
+                steps.convergence_step(iteration, inertia, inertia_label, k)
                 break
+
+        final_inertia = history[-1]["inertia"] if history else 0.0
+        final_label = history[-1]["inertia_label"] if history else "SSE"
+        if not converged:
+            steps.max_iter_stop_step(max_iter, final_inertia, final_label)
 
         self._centroids = centroids
         self._features = features
@@ -182,8 +177,9 @@ class KMeansAlgorithm(BaseAlgorithm):
             point["cluster"] = assignments[i] + 1
 
         summary = (
-            f"K-Means k={k}, {metric}, {len(history)} vòng. "
-            f"SSE cuối = {history[-1]['sse']:.4f}."
+            f"K-Means k={k}, {metric}, {len(history)} vòng"
+            f"{' (hội tụ)' if converged else f' (dừng tại max_iter={max_iter})'}. "
+            f"{final_label} cuối = {fmt_inertia(final_inertia)}."
         )
         result = AlgorithmResult(
             algorithm_name=self.name,
@@ -191,8 +187,7 @@ class KMeansAlgorithm(BaseAlgorithm):
                 "k": k,
                 "max_iter": max_iter,
                 "distance": metric,
-                "init": str(params.get("init") or "first_k"),
-                "random_seed": seed,
+                "init": init_mode,
             },
             steps=log.steps,
             output={
@@ -207,7 +202,10 @@ class KMeansAlgorithm(BaseAlgorithm):
                     for p in points
                 ],
                 "history": history,
-                "sse": history[-1]["sse"],
+                "sse": final_inertia,
+                "inertia": final_inertia,
+                "inertia_label": final_label,
+                "converged": converged,
             },
             summary=summary,
         )
@@ -230,7 +228,7 @@ class KMeansAlgorithm(BaseAlgorithm):
         ]
         for i, dist in enumerate(distances, start=1):
             mark = " ← gần nhất" if i == cluster else ""
-            lines.append(f"  d(C{i}) = {dist:.4f}{mark}")
+            lines.append(f"  d(C{i}) = {fmt_dist(dist)}{mark}")
         lines.append(f"⇒ Gán cụm C{cluster}")
         return PredictResult(
             label=f"C{cluster}",
@@ -244,35 +242,75 @@ class _KMeansSteps:
     def __init__(self, log: StepLogger) -> None:
         self._log = log
         self._metric = "euclidean"
+        self._k = 0
+        self._first_inertia: float | None = None
 
     def init_step(
         self,
         k: int,
         metric: str,
         max_iter: int,
-        seed: int,
         features: list[str],
         centroids: list[list[float]],
         formula: str,
-        init_note: str,
+        init_ids: str,
     ) -> None:
         self._metric = metric
+        self._k = k
         init_headers = ["Tâm"] + features
         init_rows = [
-            [f"m{i}"] + [f"{v:.3f}" for v in c]
+            [f"m{i}"] + [fmt_dist(v) for v in c]
             for i, c in enumerate(centroids, start=1)
         ]
+        metric_name = "Euclidean" if metric == "euclidean" else "Manhattan"
+        if metric == "euclidean":
+            metric_block = (
+                f"② Độ đo khoảng cách — {metric_name} (đã chọn):\n"
+                f"  {formula}\n"
+                '  → Đo "đường chim bay" giữa 2 điểm trong không gian.\n'
+                "  → Nhạy cảm với outlier hơn Manhattan.\n"
+                "  [So sánh] Manhattan: d(x,y) = Σ|xᵢ-yᵢ|  (\"đường taxi\")"
+            )
+            criteria_block = (
+                "③ Tiêu chí đánh giá chất lượng cụm — SSE:\n"
+                "  SSE (Sum of Squared Errors) = Σᵢ d(xᵢ, μ_cụm(i))²\n"
+                "  → Tổng bình phương khoảng cách mỗi điểm đến trọng tâm cụm.\n"
+                "  → SSE càng nhỏ → cụm càng chặt chẽ → kết quả càng tốt.\n"
+                "  [Lưu ý] Nếu dùng Manhattan → gọi là SAE, không bình phương."
+            )
+        else:
+            metric_block = (
+                f"② Độ đo khoảng cách — {metric_name} (đã chọn):\n"
+                f"  {formula}\n"
+                '  → Đo "đường taxi" (cạnh vuông góc) giữa 2 điểm.\n'
+                "  → Ít nhạy cảm với outlier hơn Euclidean.\n"
+                "  [So sánh] Euclidean: d(x,y) = √(Σ (xᵢ-yᵢ)²)  (\"đường chim bay\")"
+            )
+            criteria_block = (
+                "③ Tiêu chí đánh giá chất lượng cụm — SAE:\n"
+                "  SAE (Sum of Absolute Errors) = Σᵢ d(xᵢ, μ_cụm(i))\n"
+                "  → Tổng khoảng cách tuyệt đối mỗi điểm đến trọng tâm cụm.\n"
+                "  → SAE càng nhỏ → cụm càng chặt chẽ → kết quả càng tốt.\n"
+                "  [Lưu ý] Nếu dùng Euclidean → gọi là SSE, có bình phương."
+            )
+        description = (
+            "① Ý tưởng cốt lõi của K-Means:\n"
+            "  Chia N điểm dữ liệu thành K cụm sao cho các điểm trong\n"
+            "  cùng cụm càng gần nhau càng tốt (nội cụm gắn kết,\n"
+            "  liên cụm tách biệt).\n"
+            f"\n{metric_block}\n"
+            f"\n{criteria_block}\n"
+            f"\n④ Khởi tạo trọng tâm (μ):\n"
+            f"  Chọn ngẫu nhiên K={k} điểm từ dữ liệu làm trọng tâm ban đầu.\n"
+            f"  → Chọn: {init_ids}\n"
+            f"  Đặc trưng số: {', '.join(features)} | max_iter = {max_iter}"
+        )
         self._log.add_table(
             "Khởi tạo",
             init_headers,
             init_rows,
             ["left"] + ["right"] * len(features),
-            description=(
-                f"K = {k}, metric = {metric}, max_iter = {max_iter}, seed = {seed}\n"
-                f"Đặc trưng: {', '.join(features)}\n"
-                f"{formula}\n"
-                f"{init_note}"
-            ),
+            description=description,
             level="STEP_HEADER",
             k=k,
             centroids=[list(c) for c in centroids],
@@ -291,17 +329,33 @@ class _KMeansSteps:
         dist_rows = snap["distances"]
         assign_headers = ["Điểm"] + [f"d(C{j})" for j in range(1, k + 1)] + ["Cụm"]
         assign_rows = [
-            [row["id"], *[f"{d:.3f}" for d in row["distances"]], f"C{row['cluster']}"]
+            [row["id"], *[fmt_dist(d) for d in row["distances"]], f"C{row['cluster']}"]
             for row in dist_rows
         ]
-        cluster_lines = []
+        cluster_lines = ["Kết quả phân cụm:"]
         for i in range(1, k + 1):
-            ids = ", ".join(
-                point["id"] for point, assigned in zip(points, snap["assignments"]) if assigned == i
-            ) or "∅"
-            cluster_lines.append(f"  → Cụm {i}: {{ {ids} }}")
-        if snap["changed"]:
-            cluster_lines.append("  ✦ Đổi cụm: " + "; ".join(snap["changed"]))
+            members = [
+                point["id"]
+                for point, assigned in zip(points, snap["assignments"])
+                if assigned == i
+            ]
+            ids = ", ".join(members) or "∅"
+            cluster_lines.append(f"  → Cụm {i}: {{ {ids} }}   ({len(members)} điểm)")
+        if iteration == 1:
+            cluster_lines.append("  [Vòng đầu tiên — chưa có so sánh với vòng trước]")
+        elif snap["changed"]:
+            cluster_lines.append(
+                "  ✦ Điểm thay đổi cụm so với vòng trước: " + "; ".join(snap["changed"])
+            )
+        if iteration == 1:
+            description = (
+                "[Mã giả Bước 2a] cluster(xᵢ) ← argminⱼ d(xᵢ, μⱼ)\n"
+                "\n"
+                "① Ý nghĩa: Mỗi điểm xᵢ được gán vào cụm có trọng tâm\n"
+                '  gần nhất. "argmin" = lấy chỉ số j cho d nhỏ nhất.'
+            )
+        else:
+            description = "[Mã giả Bước 2a] cluster(xᵢ) ← argminⱼ d(xᵢ, μⱼ)"
         assign_snap = {
             **snap,
             "phase": "assign",
@@ -309,10 +363,11 @@ class _KMeansSteps:
             "rows": assign_rows,
             "alignments": ["left"] + ["right"] * k + ["center"],
             "conclusion": "\n".join(cluster_lines),
+            "omit_step_number": True,
         }
         self._log.add(
-            f"Iteration {iteration} — Bước Gán (Assignment)",
-            f"d(P, C) theo {self._metric}",
+            f"Vòng lặp {iteration} — Bước 2a: Gán cụm",
+            description,
             assign_snap,
             "SUCCESS",
         )
@@ -323,93 +378,198 @@ class _KMeansSteps:
         snap: dict[str, Any],
         centroids: list[list[float]],
         new_centroids: list[list[float]],
-        sse: float,
+        inertia: float,
+        inertia_label: str,
     ) -> None:
+        if self._first_inertia is None:
+            self._first_inertia = inertia
+        k = len(centroids)
         update_headers = ["Cụm", "Tâm cũ", "Tâm mới"]
         update_rows = []
+        diff_lines = ["So sánh tâm cũ — tâm mới:"]
+        n_changed = 0
         for i, (old, new) in enumerate(zip(centroids, new_centroids), start=1):
-            update_rows.append(
-                [
-                    f"C{i}",
-                    "(" + ", ".join(f"{v:.3f}" for v in old) + ")",
-                    "(" + ", ".join(f"{v:.3f}" for v in new) + ")",
-                ]
+            old_txt = fmt_centroid(old)
+            new_txt = fmt_centroid(new)
+            update_rows.append([f"C{i}", old_txt, new_txt])
+            changed = any(abs(a - b) > 1e-9 for a, b in zip(old, new))
+            if changed:
+                n_changed += 1
+            marker = "← thay đổi" if changed else "← không đổi"
+            diff_lines.append(f"  C{i}: {old_txt} → {new_txt}  {marker}")
+        if inertia_label == "SSE":
+            inertia_hint = f"{inertia_label} = Σ d(xᵢ, μ_cụm)² = tổng bình phương khoảng cách"
+        else:
+            inertia_hint = f"{inertia_label} = Σ d(xᵢ, μ_cụm) = tổng khoảng cách tuyệt đối"
+        if n_changed:
+            verdict = (
+                f"[Mã giả Bước 2c] Kiểm tra hội tụ:\n"
+                f"→ Có {n_changed}/{k} tâm thay đổi ⟹ CHƯA hội tụ, tiếp tục vòng {iteration + 1}"
             )
+        else:
+            verdict = (
+                "[Mã giả Bước 2c] Kiểm tra hội tụ:\n"
+                f"→ Tất cả {k} tâm không đổi ⟹ hội tụ"
+            )
+        conclusion = (
+            "\n".join(diff_lines)
+            + f"\n\n{inertia_label} = {fmt_inertia(inertia)}\n"
+            + f"({inertia_hint})\n\n"
+            + verdict
+        )
+        if iteration == 1:
+            description = (
+                "[Mã giả Bước 2b] μⱼ ← mean({ xᵢ : cluster(xᵢ) = j })\n"
+                "\n"
+                "① Ý nghĩa: Trọng tâm mới = trung bình cộng tọa độ\n"
+                '  các điểm trong cụm. Đây là điểm "trung tâm nhất"\n'
+                "  về mặt hình học."
+            )
+        else:
+            description = "[Mã giả Bước 2b] μⱼ ← mean({ xᵢ : cluster(xᵢ) = j })"
         update_snap = {
             **snap,
             "phase": "update",
             "headers": update_headers,
             "rows": update_rows,
             "alignments": ["left", "left", "left"],
-            "conclusion": f"  → SSE = {sse:.4f}",
+            "conclusion": conclusion,
+            "omit_step_number": True,
         }
         self._log.add(
-            f"Iteration {iteration} — Bước Cập nhật Trọng tâm (Update)",
-            "",
+            f"Vòng lặp {iteration} — Bước 2b: Cập nhật trọng tâm",
+            description,
             update_snap,
             "SUCCESS",
         )
 
-    def sse_warning_step(self, iteration: int, sse: float, sse_prev: float) -> None:
+    def inertia_warning_step(
+        self,
+        iteration: int,
+        inertia: float,
+        inertia_prev: float,
+        inertia_label: str,
+    ) -> None:
         self._log.add(
-            "Cảnh báo SSE",
-            f"SSE tăng từ {sse_prev:.4f} lên {sse:.4f}.",
-            {"iteration": iteration, "sse": sse, "sse_prev": sse_prev, "phase": "warning"},
+            f"Cảnh báo {inertia_label}",
+            (
+                f"{inertia_label} tăng từ {fmt_inertia(inertia_prev)} lên {fmt_inertia(inertia)} "
+                f"sau vòng lặp {iteration} (thường không mong muốn)."
+            ),
+            {
+                "iteration": iteration,
+                "sse": inertia,
+                "inertia": inertia,
+                "inertia_prev": inertia_prev,
+                "inertia_label": inertia_label,
+                "phase": "warning",
+                "omit_step_number": True,
+            },
             "WARNING",
         )
 
-    def convergence_step(self, iteration: int, sse: float) -> None:
+    def convergence_step(
+        self,
+        iteration: int,
+        inertia: float,
+        inertia_label: str,
+        k: int,
+    ) -> None:
+        first = self._first_inertia
+        if first is not None and first > inertia + 1e-9:
+            compare = (
+                f"{inertia_label} cuối = {fmt_inertia(inertia)}"
+                f"  (so với vòng 1: {fmt_inertia(first)} → đã giảm tốt)"
+            )
+        elif first is not None:
+            compare = f"{inertia_label} cuối = {fmt_inertia(inertia)}  (vòng 1: {fmt_inertia(first)})"
+        else:
+            compare = f"{inertia_label} cuối = {fmt_inertia(inertia)}"
+        description = (
+            "[Mã giả Bước 2c] NẾU trọng tâm / phân hoạch không đổi → DỪNG\n"
+            "\n"
+            "① Hội tụ là gì?\n"
+            "  Khi trọng tâm không còn di chuyển → các điểm không\n"
+            "  đổi cụm → thuật toán đã tìm được phân hoạch ổn định.\n"
+            "\n"
+            f"  Tất cả K={k} trọng tâm KHÔNG thay đổi sau vòng lặp {iteration}.\n"
+            "  ✓ Điều kiện hội tụ thỏa mãn ⟹ DỪNG THUẬT TOÁN\n"
+            "\n"
+            f"{compare}\n"
+            f"Kết luận: Thuật toán hội tụ sau {iteration} vòng lặp."
+        )
         self._log.add(
-            "Hội tụ",
-            f"Tâm không đổi sau vòng {iteration}. SSE = {sse:.4f}.",
-            {"iteration": iteration, "sse": sse, "phase": "converged"},
+            "Kết thúc — Bước 2c: Kiểm tra hội tụ",
+            description,
+            {
+                "iteration": iteration,
+                "sse": inertia,
+                "inertia": inertia,
+                "inertia_label": inertia_label,
+                "phase": "converged",
+                "omit_step_number": True,
+            },
             "SUCCESS",
         )
+
+    def max_iter_stop_step(self, max_iter: int, inertia: float, inertia_label: str) -> None:
+        first = self._first_inertia
+        compare = f"{inertia_label} cuối = {fmt_inertia(inertia)}"
+        if first is not None:
+            compare += f"  (vòng 1: {fmt_inertia(first)})"
+        description = (
+            "[Mã giả Bước 2d] NẾU t = max_iter → DỪNG\n"
+            "\n"
+            "① Giới hạn vòng lặp là gì?\n"
+            "  Dù chưa hội tụ, thuật toán vẫn dừng để tránh chạy vô hạn.\n"
+            "\n"
+            f"  Đã chạy đủ max_iter={max_iter} vòng lặp, trọng tâm vẫn còn thay đổi.\n"
+            "  ✗ Chưa hội tụ ⟹ DỪNG THEO GIỚI HẠN (max_iter)\n"
+            "\n"
+            f"{compare}\n"
+            "Kết quả có thể chưa tối ưu — thử tăng max_iter hoặc kiểm tra dữ liệu."
+        )
+        self._log.add(
+            "Kết thúc — Bước 2d: Kiểm tra giới hạn vòng lặp",
+            description,
+            {
+                "iteration": max_iter,
+                "sse": inertia,
+                "inertia": inertia,
+                "inertia_label": inertia_label,
+                "phase": "max_iter",
+                "omit_step_number": True,
+            },
+            "WARNING",
+        )
+
+
+def _compute_inertia(
+    points: list[dict[str, Any]],
+    centroids: list[list[float]],
+    assignments: list[int],
+    metric: str,
+) -> tuple[float, str]:
+    """Return (value, label): SSE for Euclidean, SAE for Manhattan."""
+    total = 0.0
+    if metric == "euclidean":
+        for idx, point in enumerate(points):
+            total += _distance(point["vector"], centroids[assignments[idx]], metric) ** 2
+        return total, "SSE"
+    for idx, point in enumerate(points):
+        total += _distance(point["vector"], centroids[assignments[idx]], metric)
+    return total, "SAE"
 
 
 def _initial_centroids(
     points: list[dict[str, Any]],
     k: int,
-    params: dict[str, Any],
     rng: random.Random,
 ) -> tuple[list[list[float]], str]:
-    init_mode = str(params.get("init") or "").strip().lower()
-    init_ids = [s.strip() for s in str(params.get("init_ids") or "").split(",") if s.strip()]
-    centroids_param = params.get("centroids")
-    if isinstance(centroids_param, str) and centroids_param.strip():
-        parsed = []
-        for chunk in centroids_param.replace(";", "|").split("|"):
-            nums = [to_float(p) for p in chunk.replace(",", " ").split() if p.strip()]
-            if nums and all(n is not None for n in nums):
-                parsed.append([float(n) for n in nums])
-        centroids_param = parsed or None
-    if centroids_param and not init_mode:
-        init_mode = "manual"
-    if init_ids and not init_mode:
-        init_mode = "manual"
-    if not init_mode:
-        init_mode = "random"
-
-    if init_mode == "first_k":
-        centroids = [list(p["vector"]) for p in points[:k]]
-        ids = ", ".join(p["id"] for p in points[:k])
-        return centroids, f"Tâm ban đầu (first_k: {ids}):"
-    if init_mode == "manual" and centroids_param:
-        if len(centroids_param) != k:
-            raise ValueError(f"centroids có {len(centroids_param)} tâm nhưng K = {k}.")
-        centroids = [list(map(float, c)) for c in centroids_param]
-        return centroids, "Tâm ban đầu (manual):"
-    if init_ids:
-        by_id = {p["id"]: p for p in points}
-        missing = [pid for pid in init_ids if pid not in by_id]
-        if missing:
-            raise ValueError(f"Không tìm thấy id khởi tạo: {', '.join(missing)}")
-        if len(init_ids) != k:
-            raise ValueError(f"init_ids có {len(init_ids)} tâm nhưng K = {k}.")
-        centroids = [list(by_id[pid]["vector"]) for pid in init_ids]
-        return centroids, f"Tâm ban đầu (theo id {', '.join(init_ids)}):"
-    centroids = [list(p["vector"]) for p in rng.sample(points, k)]
-    return centroids, "Tâm ban đầu (ngẫu nhiên):"
+    chosen = rng.sample(points, k)
+    centroids = [list(p["vector"]) for p in chosen]
+    ids = ", ".join(p["id"] for p in chosen)
+    return centroids, ids
 
 
 def _point_id(row: dict[str, Any], index: int) -> str:

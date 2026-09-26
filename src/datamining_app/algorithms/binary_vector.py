@@ -7,6 +7,7 @@ from datamining_app.algorithms.apriori import generate_association_rules
 from datamining_app.algorithms.base import BaseAlgorithm, StepLogger
 from datamining_app.algorithms.dataset_utils import extract_transactions, format_itemset, minsup_count
 from datamining_app.core.models import AlgorithmResult, Dataset, ParamDef
+from datamining_app.fmt import fmt_pct, fmt_support
 
 
 class BinaryVectorAlgorithm(BaseAlgorithm):
@@ -62,7 +63,7 @@ class BinaryVectorAlgorithm(BaseAlgorithm):
             for itemset in sets:
                 sp = supports[itemset]
                 count = int(round(sp * n))
-                freq_rows.append([str(k_level), format_itemset(itemset), count, f"{sp * 100:.2f}%"])
+                freq_rows.append([str(k_level), format_itemset(itemset), count, fmt_support(sp)])
         steps.summary_step(freq_rows)
         rules = generate_association_rules(supports, minconf)
         steps.rules_step(rules, minconf)
@@ -70,7 +71,7 @@ class BinaryVectorAlgorithm(BaseAlgorithm):
         levels = {k: [list(s) for s in sets] for k, sets in mined.levels.items()}
         summary = (
             f"Binary Vector: {len(freq_rows)} tập phổ biến, "
-            f"{len(rules)} luật (minsup={minsup:.0%}, minconf={minconf:.0%})."
+            f"{len(rules)} luật (minsup={fmt_pct(minsup)}, minconf={fmt_pct(minconf)})."
         )
         result = AlgorithmResult(
             algorithm_name=self.name,
@@ -92,6 +93,7 @@ class BinaryVectorAlgorithm(BaseAlgorithm):
 class _BinarySteps:
     def __init__(self, log: StepLogger) -> None:
         self._log = log
+        self._and_explained = False
 
     def matrix_step(
         self,
@@ -104,11 +106,33 @@ class _BinarySteps:
             [f"T{i}"] + ["1" if item in txn else "0" for item in items]
             for i, txn in enumerate(transactions, start=1)
         ]
+        example_item = items[0] if items else "?"
+        example_vec = item_vectors.get(example_item, [])
+        example_sum = sum(example_vec)
+        n = len(transactions) or 1
+        example_sp = example_sum / n
+        description = (
+            "① Ý tưởng cốt lõi của Binary Vector:\n"
+            "  Thay vì quét D nhiều lần như Apriori, ta mã hóa\n"
+            "  toàn bộ dữ liệu thành ma trận bit một lần, sau đó\n"
+            "  dùng phép AND để đếm support trong O(1).\n"
+            "\n"
+            "② Ma trận (O, I, R):\n"
+            "  O = tập đối tượng (giao dịch), I = tập item\n"
+            "  R[t][i] = 1 nếu giao dịch t chứa item i, = 0 nếu không.\n"
+            "\n"
+            "③ Đọc vector:\n"
+            "  Cột của item = vector bit của item đó.\n"
+            f'  Ví dụ: cột "{example_item}" = {example_vec}'
+            f" → count = {example_sum}\n"
+            f'  support("{example_item}") = {example_sum}/{n} = {fmt_support(example_sp)}'
+        )
         self._log.add_table(
-            "Ma trận ngữ cảnh nhị phân (O, I, R)",
+            "Xây ma trận nhị phân (O, I, R)",
             matrix_headers,
             matrix_rows,
             ["left"] + ["center"] * len(items),
+            description=description,
             level="STEP_HEADER",
             items=items,
             transactions=transactions,
@@ -118,17 +142,45 @@ class _BinarySteps:
     def init_step(self, n: int, minsup: float, min_count: int, minconf: float, n_items: int) -> None:
         self._log.add(
             "Khởi tạo",
-            f"N = {n} giao dịch, |I| = {n_items}.\n"
-            f"minsup = {minsup:.2%}  →  Count ≥ {min_count} (SP = Count/N)\n"
-            f"minconf = {minconf:.2%}.",
+            (
+                f"[Mã giả Bước 2] F₁ ← {{i : |vector(i)| / |O| ≥ minsup}}\n"
+                f"N = {n} giao dịch, |I| = {n_items}.\n"
+                f"minsup = {fmt_pct(minsup)}  →  Count ≥ {min_count} (SP = Count/N)\n"
+                f"minconf = {fmt_pct(minconf)}."
+            ),
             {"n": n, "minsup": minsup, "min_count": min_count, "minconf": minconf},
         )
 
     def level_step(self, level: dict[str, Any]) -> None:
         k = level["k"]
+        if k == 1:
+            description = (
+                "[Mã giả Bước 2] F₁ từ vector 1-item\n"
+                "① Mỗi item có 1 cột bit; support = sum(vector) / N."
+                if level["rows"]
+                else "Không sinh được tập ứng viên."
+            )
+        elif not self._and_explained:
+            self._and_explained = True
+            description = (
+                "[Mã giả Bước 4] v ← vector(X) AND vector(Y)\n"
+                "\n"
+                "① Phép AND nhị phân:\n"
+                "  v[t] = 1 chỉ khi CẢ HAI item X và Y đều có trong T_t.\n"
+                "  → Bit-1 trong v = giao dịch chứa đồng thời cả X lẫn Y.\n"
+                "  → count({X,Y}) = sum(v)  — nhanh hơn quét D từng ứng viên."
+                if level["rows"]
+                else "Không sinh được tập ứng viên."
+            )
+        else:
+            description = (
+                f"[Mã giả Bước 4] AND các vector → F_{k}"
+                if level["rows"]
+                else "Không sinh được tập ứng viên."
+            )
         self._log.add(
-            f"Cấp k = {k} — Vector F_{k}",
-            "" if level["rows"] else "Không sinh được tập ứng viên.",
+            f"Cấp k = {k} — Vector F_{k}" + (" — phép AND" if k >= 2 else ""),
+            description,
             {
                 "k": k,
                 "candidates": level["rows"],
@@ -151,13 +203,16 @@ class _BinarySteps:
     def rules_step(self, rules: list[dict[str, Any]], minconf: float) -> None:
         self._log.add(
             "Sinh luật kết hợp từ tập phổ biến",
-            "",
+            (
+                "[Mã giả Bước 5] Sinh luật từ ∪ Fₖ với conf ≥ minconf\n"
+                "① conf(X ⇒ Y) = support(X∪Y) / support(X)."
+            ),
             {
                 "rules": rules,
                 "conclusion": (
-                    f"  → {len(rules)} luật đạt minconf = {minconf:.2%}."
+                    f"  → {len(rules)} luật đạt minconf = {fmt_pct(minconf)}."
                     if rules
-                    else f"  → Không có luật nào đạt minconf = {minconf:.2%}."
+                    else f"  → Không có luật nào đạt minconf = {fmt_pct(minconf)}."
                 ),
             },
             "SUCCESS",

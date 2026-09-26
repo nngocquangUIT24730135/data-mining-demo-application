@@ -6,6 +6,7 @@ from typing import Callable
 
 from datamining_app.data.preprocessor import ExcludeValidationError, validate_exclude
 from datamining_app.i18n import i18n
+from datamining_app.ui.windowing import enable_maximize
 
 
 class ExcludeColumnsDialog(tk.Toplevel):
@@ -27,8 +28,9 @@ class ExcludeColumnsDialog(tk.Toplevel):
         self.extra = extra or {}
         self.title(i18n.t("exclude_columns"))
         self.transient(master)
-        self.resizable(False, True)
+        self.minsize(320, 360)
         self.geometry("360x420")
+        enable_maximize(self)
 
         ttk.Label(self, text=i18n.t("exclude_hint"), wraplength=320).pack(anchor="w", padx=12, pady=(12, 6))
         host = ttk.Frame(self)

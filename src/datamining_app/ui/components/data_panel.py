@@ -9,6 +9,13 @@ from datamining_app.data.loader import list_datasets, load_dataset
 from datamining_app.data.preprocessor import Preprocessor, identifier_headers, validate_exclude
 from datamining_app.i18n import i18n
 from datamining_app.ui.dialogs.exclude_columns_dialog import ExcludeColumnsDialog
+from datamining_app.ui.theme import (
+    COLOR_SUBTEXT,
+    COLOR_TEXT,
+    FONT_BODY,
+    FONT_SUBTEXT,
+    apply_data_tree_tags,
+)
 
 
 class DataPanel(ttk.LabelFrame):
@@ -48,22 +55,31 @@ class DataPanel(ttk.LabelFrame):
         self.table_combo.pack(side="left", fill="x", expand=True)
         self.table_combo.bind("<<ComboboxSelected>>", lambda _e: self.load_sqlite())
 
-        self.desc_lbl = ttk.Label(self, text="", wraplength=280, foreground="#555555")
+        self.desc_lbl = ttk.Label(
+            self, text="", wraplength=280, foreground=COLOR_TEXT, font=FONT_BODY
+        )
         self.desc_lbl.pack(anchor="w", padx=8)
 
-        self.status = ttk.Label(self, text=i18n.t("no_data"), wraplength=280)
+        self.status = ttk.Label(self, text=i18n.t("no_data"), wraplength=280, foreground=COLOR_TEXT, font=FONT_BODY)
         self.status.pack(anchor="w", padx=8)
 
         exclude_row = ttk.Frame(self)
         exclude_row.pack(fill="x", padx=8, pady=(8, 0))
         self.exclude_btn = ttk.Button(exclude_row, text=i18n.t("exclude_columns"), command=self.open_exclude)
         self.exclude_btn.pack(side="left")
-        self.exclude_summary = ttk.Label(exclude_row, text=i18n.t("exclude_none"), wraplength=180)
+        self.exclude_summary = ttk.Label(
+            exclude_row,
+            text=i18n.t("exclude_none"),
+            wraplength=180,
+            foreground=COLOR_SUBTEXT,
+            font=FONT_SUBTEXT,
+        )
         self.exclude_summary.pack(side="left", padx=8)
 
         self.preview_lbl = ttk.Label(self, text=i18n.t("preview"))
         self.preview_lbl.pack(anchor="w", padx=8, pady=(8, 0))
-        self.tree = ttk.Treeview(self, show="headings", height=7)
+        self.tree = ttk.Treeview(self, show="headings", height=7, style="Data.Treeview")
+        apply_data_tree_tags(self.tree)
         self.tree.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
         i18n.subscribe(self.refresh_texts)
@@ -169,8 +185,9 @@ class DataPanel(ttk.LabelFrame):
         for h in headers:
             self.tree.heading(h, text=h)
             self.tree.column(h, width=80, stretch=True)
-        for row in self.processed.rows[:40]:
-            self.tree.insert("", "end", values=[row.get(h, "") for h in headers])
+        for index, row in enumerate(self.processed.rows[:40]):
+            stripe = "odd" if index % 2 == 0 else "even"
+            self.tree.insert("", "end", values=[row.get(h, "") for h in headers], tags=(stripe,))
 
     def current_dataset(self) -> Dataset | None:
         return self.processed

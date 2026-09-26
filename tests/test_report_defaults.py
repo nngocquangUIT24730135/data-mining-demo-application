@@ -7,7 +7,7 @@ def test_report_defaults_follow_registry():
     assert DEFAULT_TABLES["kmeans"] == "kmeans_2d_7pts"
     assert params_for("apriori", "apriori_standard_9tx")["minsup"] == 0.2222
     assert params_for("id3", "id3_weather_play")["decision_attr"] == "Play"
-    assert params_for("kmeans", "kmeans_2d_7pts")["init"] == "manual"
+    assert params_for("kmeans", "kmeans_2d_7pts")["init"] == "random"
 
 
 def test_validate_exclude_pid_ok():

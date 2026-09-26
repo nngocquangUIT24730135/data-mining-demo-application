@@ -1,8 +1,9 @@
 from datamining_app.algorithms.apriori import AprioriAlgorithm
 from datamining_app.algorithms.binary_vector import BinaryVectorAlgorithm
+from datamining_app.algorithms.cart_gini import CARTGiniAlgorithm
 from datamining_app.algorithms.id3 import ID3Algorithm
 from datamining_app.algorithms.kmeans import KMeansAlgorithm
-from datamining_app.algorithms.naive_bayes import NaiveBayesAlgorithm
+from datamining_app.algorithms.naive_bayes import ClassicNaiveBayesAlgorithm, LaplaceBayesAlgorithm
 from datamining_app.algorithms.rough_set import RoughSetAlgorithm
 from datamining_app.console.formatter import ConsoleFormatter, display_width
 from datamining_app.data.embedded_db.catalog import DEFAULT_TABLES
@@ -14,7 +15,9 @@ ALGOS = {
     "binary_vector": BinaryVectorAlgorithm,
     "rough_set": RoughSetAlgorithm,
     "id3": ID3Algorithm,
-    "naive_bayes": NaiveBayesAlgorithm,
+    "cart_gini": CARTGiniAlgorithm,
+    "naive_bayes": ClassicNaiveBayesAlgorithm,
+    "naive_bayes_laplace": LaplaceBayesAlgorithm,
     "kmeans": KMeansAlgorithm,
 }
 

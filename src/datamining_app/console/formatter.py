@@ -4,6 +4,7 @@ import unicodedata
 from typing import Any, Iterable, Sequence
 
 from datamining_app.core.models import AlgorithmResult, StepLog
+from datamining_app.fmt import SCORE_DECIMALS, fmt_pct, fmt_support
 
 BOX = {
     "tl": "┌",
@@ -29,7 +30,7 @@ class ConsoleFormatter:
             f"THUẬT TOÁN {name.upper()}",
             f"Dữ liệu : {dataset_name}  ({n_rows} dòng)",
         ]
-        skip = {"exclude_cols", "centroids", "feature_cols", "condition_attrs", "init_ids"}
+        skip = {"exclude_cols", "condition_attrs"}
         for key, value in params.items():
             if key in skip:
                 continue
@@ -41,7 +42,12 @@ class ConsoleFormatter:
         return "\n".join([top, *body, bot])
 
     def step_header(self, step: StepLog) -> str:
-        title = f" Bước {step.step_number}: {step.title} "
+        # When title already encodes the algorithm step label (e.g. "Vòng lặp 1 — Bước 2a"),
+        # skip the auto "Bước N:" prefix to avoid double numbering.
+        if (step.data or {}).get("omit_step_number"):
+            title = f" {step.title} "
+        else:
+            title = f" Bước {step.step_number}: {step.title} "
         fill = max(self.width - 2 - display_width(title), 4)
         return "──" + title + "─" * fill
 
@@ -83,24 +89,40 @@ class ConsoleFormatter:
         if not headers:
             return ""
         str_rows = [[_cell(v) for v in row] for row in rows]
-        widths = [display_width(h) for h in headers]
+
+        # Multi-line headers: split on "\n", width = longest line per column.
+        header_lines_per_col = [str(h).split("\n") for h in headers]
+        max_header_lines = max(len(col_lines) for col_lines in header_lines_per_col)
+        widths = [
+            max(display_width(line) for line in col_lines)
+            for col_lines in header_lines_per_col
+        ]
         for row in str_rows:
             for i, cell in enumerate(row):
                 if i < len(widths):
                     widths[i] = max(widths[i], display_width(cell))
         widths = [w + COLUMN_PAD for w in widths]
+
         aligns = list(alignments or [])
         while len(aligns) < len(headers):
             aligns.append("left")
+
         h = BOX["h"]
         top = BOX["tl"] + BOX["tm"].join(h * (w + 2) for w in widths) + BOX["tr"]
         mid = BOX["lm"] + BOX["x"].join(h * (w + 2) for w in widths) + BOX["rm"]
         bot = BOX["bl"] + BOX["bm"].join(h * (w + 2) for w in widths) + BOX["br"]
-        header = (
-            BOX["v"]
-            + BOX["v"].join(pad_display(headers[i], widths[i], aligns[i], inner=True) for i in range(len(headers)))
-            + BOX["v"]
-        )
+
+        header_lines = []
+        for line_idx in range(max_header_lines):
+            line_parts = []
+            for col_idx in range(len(headers)):
+                col_lines = header_lines_per_col[col_idx]
+                text = col_lines[line_idx] if line_idx < len(col_lines) else ""
+                align = "center" if max_header_lines > 1 else aligns[col_idx]
+                line_parts.append(pad_display(text, widths[col_idx], align, inner=True))
+            header_lines.append(BOX["v"] + BOX["v"].join(line_parts) + BOX["v"])
+        header = "\n".join(header_lines)
+
         body = [
             BOX["v"]
             + BOX["v"].join(
@@ -122,7 +144,7 @@ class ConsoleFormatter:
             rhs = _itemset(rule.get("consequent") or rule.get("rhs") or [])
             sp = rule.get("support", 0)
             conf = rule.get("confidence", 0)
-            rows.append([str(i), f"{lhs} → {rhs}", f"{float(sp)*100:.2f}%", f"{float(conf)*100:.2f}%"])
+            rows.append([str(i), f"{lhs} → {rhs}", fmt_support(float(sp)), fmt_support(float(conf))])
         return self.render_table(
             ["#", "Luật", "Support", "Confidence"],
             rows,
@@ -153,11 +175,33 @@ class ConsoleFormatter:
         ).replace(" Bước 0: ", " ")
         return "\n".join([header, "", explanation, "", top, mid, bot, ""])
 
+    def render_pseudocode(self, algo_key: str) -> str:
+        from datamining_app.algorithms.pseudocode import PSEUDOCODE
+
+        text = PSEUDOCODE.get(algo_key, "")
+        if not text:
+            return ""
+        lines = text.strip().splitlines()
+        content_w = max(display_width(line) for line in lines)
+        inner_w = max(self.width - 2, content_w + 4)
+        label = " MÃ GIẢ "
+        label_w = display_width(label)
+        dash_total = max(inner_w - label_w, 2)
+        left = dash_total // 2
+        right = dash_total - left
+        top = "┌" + "─" * left + label + "─" * right + "┐"
+        bot = "└" + "─" * inner_w + "┘"
+        body = ["│" + pad_display("  " + line, inner_w, "left") + "│" for line in lines]
+        return "\n".join([top, *body, bot])
+
     def render_result(self, result: AlgorithmResult, dataset_name: str = "", n_rows: int = 0) -> str:
         chunks = [
             self.banner(result.algorithm_name, dataset_name or "", n_rows, result.parameters),
             "",
         ]
+        pseudo = self.render_pseudocode(_pseudo_key(result.algorithm_name))
+        if pseudo:
+            chunks.extend([pseudo, ""])
         for step in result.steps:
             chunks.append(self.render_step(step))
             chunks.append("")
@@ -187,7 +231,7 @@ class ConsoleFormatter:
             for row in candidates:
                 verdict = "✓ Chấp nhận" if row.get("accepted") else "✗ Loại bỏ"
                 item = _itemset(row.get("itemset") or [])
-                sp = f"{float(row.get('support', 0))*100:.2f}%"
+                sp = fmt_support(float(row.get("support", 0)))
                 if has_vector:
                     vec = "(" + ", ".join(str(b) for b in (row.get("vector") or [])) + ")"
                     if row.get("left") and row.get("right"):
@@ -288,7 +332,37 @@ def _conclusion_lines(description: str) -> str:
 
 def _fmt_param(key: str, value: Any) -> str:
     if key in {"minsup", "minconf"} and isinstance(value, (int, float)):
-        return f"{float(value) * 100:.2f}%"
+        return fmt_pct(float(value))
     if isinstance(value, float):
-        return f"{value:.4f}".rstrip("0").rstrip(".")
+        return f"{value:.{SCORE_DECIMALS}f}".rstrip("0").rstrip(".")
     return str(value)
+
+
+def _pseudo_key(algorithm_name: str) -> str:
+    """Map AlgorithmResult.algorithm_name → PSEUDOCODE dict key."""
+    # NFD + strip combining marks so Vietnamese (ổ, ể, …) → ASCII base letters.
+    decomposed = unicodedata.normalize("NFD", algorithm_name.lower())
+    ascii_ish = "".join(
+        ch for ch in decomposed if unicodedata.category(ch) != "Mn"
+    )
+    raw = (
+        ascii_ish.replace("đ", "d")
+        .replace(" ", "_")
+        .replace("-", "_")
+    )
+    aliases = {
+        "k_means": "kmeans",
+        "kmeans": "kmeans",
+        "apriori": "apriori",
+        "binary_vector": "binary_vector",
+        "rough_set": "rough_set",
+        "id3": "id3",
+        "cart_gini": "cart_gini",
+        "cart_(gini_index)": "cart_gini",
+        "naive_bayes": "naive_bayes",
+        "naive_bayes_(co_dien)": "naive_bayes",
+        "naive_bayes_(classic)": "naive_bayes",
+        "naive_bayes_(laplace)": "naive_bayes_laplace",
+        "naive_bayes_laplace": "naive_bayes_laplace",
+    }
+    return aliases.get(raw, raw)

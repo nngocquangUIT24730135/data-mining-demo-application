@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import threading
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 from typing import Any, Callable
 
 from datamining_app.algorithms.base import BaseAlgorithm
 from datamining_app.core.models import Dataset
 from datamining_app.data.embedded_db.catalog import DEFAULT_TABLES
-from datamining_app.exporters.txt_exporter import TxtExporter
 from datamining_app.i18n import i18n
 from datamining_app.report_defaults import params_for
 from datamining_app.ui.components.console_widget import ConsoleWidget
@@ -25,7 +24,7 @@ class AlgorithmPage(ttk.Frame):
         master,
         algorithm: BaseAlgorithm,
         page_key: str,
-        on_busy: Callable[[bool], None] | None = None,
+        on_busy: Callable[..., None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(master, **kwargs)
@@ -96,7 +95,7 @@ class AlgorithmPage(ttk.Frame):
 
     def _finish(self, result, error: Exception | None) -> None:
         self.running = False
-        self.on_busy(False)
+        self.on_busy(False, error is None)
         if error is not None:
             messagebox.showerror(i18n.t("app_title"), i18n.t("error", msg=str(error)))
             self.console.log_info(i18n.t("error", msg=str(error)))
@@ -106,14 +105,17 @@ class AlgorithmPage(ttk.Frame):
         self.console.show_result(result, name, n_rows)
         if self.algorithm.supports_predict:
             fields = _predict_fields(self.algorithm, self.dataset)
-            self.predict_panel.set_fields(fields, self.dataset)
+            force_entry = self.page_key == "kmeans"
+            self.predict_panel.set_fields(fields, self.dataset, force_entry=force_entry)
+            if not self.predict_panel.winfo_ismapped():
+                self.predict_panel.pack(fill="x", padx=6, pady=(0, 6))
 
     def show_graph(self) -> None:
         result = self.algorithm._last_result
         if not result:
             self.console.log_info(i18n.t("no_result"))
             return
-        kind = "tree" if self.page_key == "id3" else "cluster"
+        kind = "tree" if self.page_key in {"id3", "cart_gini"} else "cluster"
         VizPopup(self.winfo_toplevel(), result, kind, highlight=self._highlight)
 
     def show_pseudocode(self) -> None:
@@ -149,18 +151,6 @@ class AlgorithmPage(ttk.Frame):
             )
         self.console.log_prediction(pred.label, pred.explanation)
         self._highlight = pred.details.get("vector")
-
-    def export_txt(self) -> None:
-        result = self.algorithm._last_result
-        if not result:
-            self.console.log_info(i18n.t("no_result"))
-            return
-        path = filedialog.asksaveasfilename(
-            title=i18n.t("choose_save_txt"), defaultextension=".txt", filetypes=[("Text", "*.txt")]
-        )
-        if path:
-            TxtExporter().export(result, path)
-            self.console.log_info(i18n.t("export_ok", path=path))
 
 
 def _predict_fields(algorithm: BaseAlgorithm, dataset: Dataset | None) -> list[str]:

@@ -70,7 +70,7 @@ def validate_exclude(
         if not item_cols:
             raise ExcludeValidationError("Apriori/Binary Vector cần còn ít nhất 1 cột item sau khi loại cột.")
 
-    if algorithm in {"id3", "naive_bayes", "rough_set"}:
+    if algorithm in {"id3", "cart_gini", "naive_bayes", "naive_bayes_laplace", "rough_set"}:
         if len(remaining) < 2:
             raise ExcludeValidationError("Cần còn ít nhất 2 cột (điều kiện + quyết định).")
         decision = extra.get("decision_attr")

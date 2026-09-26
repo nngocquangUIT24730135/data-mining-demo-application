@@ -112,8 +112,6 @@ class ParamPanel(ttk.LabelFrame):
             "euclidean": "Euclidean",
             "manhattan": "Manhattan",
             "random": "Random",
-            "first_k": "First k",
-            "manual": "Manual",
         }
         var = tk.StringVar(value=str(current if current in options else (options[0] if options else "")))
         box = ttk.Frame(row)

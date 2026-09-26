@@ -14,9 +14,9 @@ from matplotlib.figure import Figure
 from datamining_app.console.formatter import ConsoleFormatter
 from datamining_app.core.models import AlgorithmResult, StepLog
 from datamining_app.i18n import i18n
-from datamining_app.ui.components.console_widget import make_console_text, tag_for_line
+from datamining_app.ui.components.console_widget import LineTagger, make_console_text
 from datamining_app.ui.step_slides import console_slides
-from datamining_app.ui.windowing import maximize
+from datamining_app.ui.windowing import enable_maximize, maximize
 from datamining_app.visualizers.cluster_visualizer import ClusterVisualizer
 from datamining_app.visualizers.tree_visualizer import TreeVisualizer
 
@@ -32,6 +32,7 @@ class StepByStepDialog(tk.Toplevel):
         self.title(i18n.t("demo_steps"))
         self.minsize(960, 640)
         self.transient(master)
+        enable_maximize(self)
 
         chrome = ttk.Frame(self, padding=(12, 10, 12, 8))
         chrome.pack(side="top", fill="x")
@@ -103,7 +104,10 @@ class StepByStepDialog(tk.Toplevel):
             self.header.configure(text=i18n.t("no_result"))
             return
         step = self.slides[self.index]
-        self.header.configure(text=f"Bước {step.step_number}: {step.title}")
+        if (step.data or {}).get("omit_step_number"):
+            self.header.configure(text=step.title)
+        else:
+            self.header.configure(text=f"Bước {step.step_number}: {step.title}")
         self.progress.configure(text=i18n.t("step_progress", n=self.index + 1, total=len(self.slides)))
         self.ax.clear()
         draw_step(self.result, step, self.ax)
@@ -116,14 +120,15 @@ class StepByStepDialog(tk.Toplevel):
     def _fill_console(self, step: StepLog) -> None:
         self.console.delete("1.0", "end")
         text = self.formatter.render_step(step)
+        tagger = LineTagger()
         for line in text.splitlines(True):
-            self.console.insert("end", line, tag_for_line(line))
+            self.console.insert("end", line, tagger.tag(line))
         self.console.see("1.0")
 
 
 def _kind_for(result: AlgorithmResult) -> str:
     name = (result.algorithm_name or "").lower()
-    if "id3" in name:
+    if "id3" in name or "cart" in name or "gini" in name:
         return "tree"
     if "k-means" in name or "kmeans" in name:
         return "cluster"
@@ -137,7 +142,7 @@ def draw_step(result: AlgorithmResult, step: StepLog, ax) -> None:
     if name == "K-Means":
         _draw_kmeans(result, step, ax)
         return
-    if name == "ID3":
+    if name == "ID3" or "CART" in name or "Gini" in name:
         _draw_id3(result, step, ax)
         return
     if _draw_bars_from_step(data, ax, title):

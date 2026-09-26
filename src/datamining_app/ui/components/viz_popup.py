@@ -11,7 +11,7 @@ from matplotlib.figure import Figure
 
 from datamining_app.core.models import AlgorithmResult
 from datamining_app.i18n import i18n
-from datamining_app.ui.windowing import maximize
+from datamining_app.ui.windowing import enable_maximize, maximize
 from datamining_app.visualizers.cluster_visualizer import ClusterVisualizer
 from datamining_app.visualizers.tree_visualizer import TreeVisualizer
 
@@ -22,10 +22,15 @@ class VizPopup(tk.Toplevel):
         self.result = result
         self.kind = kind
         self.highlight = highlight
-        title = "Cây quyết định — ID3" if kind == "tree" else "Phân cụm K-Means"
+        if kind == "tree":
+            algo = result.algorithm_name or "Tree"
+            title = f"Cây quyết định — {algo}"
+        else:
+            title = "Phân cụm K-Means"
         self.title(title)
         self.minsize(720, 520)
         self.transient(master)
+        enable_maximize(self)
         maximize(self)
 
         self.columnconfigure(0, weight=1)

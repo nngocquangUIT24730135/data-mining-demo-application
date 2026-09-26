@@ -5,6 +5,7 @@ from typing import Any
 import numpy as np
 
 from datamining_app.core.models import AlgorithmResult
+from datamining_app.fmt import fmt_inertia
 
 PALETTE = ["#4A90D9", "#5CB85C", "#F0AD4E", "#D9534F", "#5BC0DE", "#9B59B6", "#E67E22", "#1ABC9C"]
 
@@ -106,14 +107,31 @@ class ClusterVisualizer:
             ax.grid(alpha=0.3)
         ax.legend(fontsize=8)
         metric_label = "Euclide" if metric != "manhattan" else "Manhattan"
+        snap_label = ""
+        inertia_val = sse
+        if history:
+            active = history[-1] if iteration is None else history[min(max(iteration, 0), len(history) - 1)]
+            snap_label = str(active.get("inertia_label") or "")
+            inertia_val = active.get("inertia", active.get("sse", sse))
+        inertia_label = (
+            output.get("inertia_label")
+            or snap_label
+            or ("SAE" if metric == "manhattan" else "SSE")
+        )
         if raw or show_init:
             title = f"Khởi tạo trọng tâm ({metric_label})"
         elif phase == "assign" and title_iter is not None:
-            title = f"Iteration {title_iter} — Gán cụm ({metric_label})"
+            title = f"Vòng lặp {title_iter} — Bước 2a: Gán cụm ({metric_label})"
         elif phase == "update" and title_iter is not None:
-            title = f"Iteration {title_iter} — Cập nhật tâm · SSE = {float(sse or 0):.4f}"
+            title = (
+                f"Vòng lặp {title_iter} — Bước 2b: Cập nhật tâm"
+                f" · {inertia_label} = {fmt_inertia(float(inertia_val or 0))}"
+            )
         elif title_iter is not None:
-            title = f"Iteration {title_iter} — SSE ({metric_label}) = {float(sse or 0):.4f}"
+            title = (
+                f"Vòng lặp {title_iter} — {inertia_label} ({metric_label})"
+                f" = {fmt_inertia(float(inertia_val or 0))}"
+            )
         else:
             title = f"Phân cụm K-Means ({metric_label})"
         ax.set_title(title)

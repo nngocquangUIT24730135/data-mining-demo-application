@@ -11,6 +11,7 @@ from datamining_app.algorithms.dataset_utils import (
     support_count,
 )
 from datamining_app.core.models import AlgorithmResult, Dataset, ParamDef
+from datamining_app.fmt import fmt_pct, fmt_support
 
 
 class AprioriAlgorithm(BaseAlgorithm):
@@ -80,7 +81,7 @@ class AprioriAlgorithm(BaseAlgorithm):
             for itemset in itemsets:
                 sp = all_frequent[itemset]
                 freq_rows.append(
-                    [str(level_k), format_itemset(itemset), support_count(itemset, transactions), f"{sp * 100:.2f}%"]
+                    [str(level_k), format_itemset(itemset), support_count(itemset, transactions), fmt_support(sp)]
                 )
         n_freq = len(freq_rows)
         steps.summary_step(freq_rows, maximal)
@@ -89,7 +90,7 @@ class AprioriAlgorithm(BaseAlgorithm):
 
         summary = (
             f"Apriori tìm {n_freq} tập phổ biến "
-            f"({len(rules)} luật đạt minconf = {minconf:.0%}). "
+            f"({len(rules)} luật đạt minconf = {fmt_pct(minconf)}). "
             f"Tập phổ biến tối đại: {', '.join(format_itemset(x) for x in maximal) or '∅'}."
         )
         result = AlgorithmResult(
@@ -111,13 +112,34 @@ class AprioriAlgorithm(BaseAlgorithm):
 class _AprioriSteps:
     def __init__(self, log: StepLogger) -> None:
         self._log = log
+        self._min_count = 0
+        self._join_explained = False
+        self._filter_explained = False
 
     def init_step(self, n: int, minsup: float, min_count: int, minconf: float) -> None:
+        self._min_count = min_count
         self._log.add(
             "Khởi tạo",
-            f"N = {n} giao dịch.\n"
-            f"minsup = {minsup:.2%}  →  min_count = ⌈{minsup}×{n}⌉ = {min_count}\n"
-            f"minconf = {minconf:.2%}.",
+            (
+                "① Ý tưởng cốt lõi của Apriori:\n"
+                "  Tìm các tập mặt hàng xuất hiện đủ thường xuyên trong\n"
+                "  các giao dịch (tập phổ biến), rồi sinh luật kết hợp.\n"
+                '  Ví dụ: "70% khách mua {Bánh mì, Sữa} → cũng mua {Bơ}".\n'
+                "\n"
+                "② Độ hỗ trợ (Support):\n"
+                "  support({X}) = số giao dịch chứa X / tổng giao dịch\n"
+                "  → Đo mức độ phổ biến. minsup = ngưỡng tối thiểu.\n"
+                f"  min_count = ⌈minsup × N⌉ = ⌈{minsup} × {n}⌉ = {min_count}\n"
+                "\n"
+                "③ Tính chất anti-monotone (nền tảng của Apriori):\n"
+                "  Nếu {X} không phổ biến → mọi tập cha {X,Y} cũng không phổ biến.\n"
+                "  → Không cần kiểm tra {X,Y} nếu {X} đã bị loại (cắt tỉa).\n"
+                "\n"
+                "④ Độ tin cậy (Confidence) — dùng khi sinh luật:\n"
+                "  conf(X ⇒ Y) = support(X∪Y) / support(X)\n"
+                "  → Nếu biết X thì Y xuất hiện với xác suất bao nhiêu?\n"
+                f"\nN = {n} giao dịch | minsup = {fmt_pct(minsup)} | minconf = {fmt_pct(minconf)}"
+            ),
             {"n": n, "minsup": minsup, "min_count": min_count, "minconf": minconf},
             "STEP_HEADER",
         )
@@ -127,13 +149,31 @@ class _AprioriSteps:
             title = "Cấp k = 1 — C₁ và L₁"
             conclusion = f"  → L₁ = {self._format_level(l_k)}"
             level = "SUCCESS"
+            description = (
+                "[Mã giả Bước 1–2] C₁ ← tất cả item; L₁ ← {c ∈ C₁ : support ≥ minsup}\n"
+                f"① Với mỗi ứng viên: đếm giao dịch chứa nó; giữ nếu count ≥ {self._min_count}."
+            )
         else:
-            title = f"Cấp k = {k} — C_{k} và L_{k}"
+            title = f"Cấp k = {k} — Đếm support → Lọc L_{k}"
             conclusion = f"  → L_{k} = {self._format_level(l_k)}"
             level = "SUCCESS" if l_k else "WARNING"
+            if not self._filter_explained:
+                self._filter_explained = True
+                description = (
+                    f"[Mã giả Bước 4] đếm support(c) trên D; L_{k} ← {{c : support ≥ minsup}}\n"
+                    "\n"
+                    f"① Với mỗi ứng viên trong C_{k}: quét toàn bộ D,\n"
+                    "  đếm số giao dịch chứa ứng viên đó.\n"
+                    f"  → Giữ lại nếu count ≥ min_count = {self._min_count}."
+                )
+            else:
+                description = (
+                    f"[Mã giả Bước 4] đếm support → L_{k} "
+                    f"(ngưỡng min_count = {self._min_count})"
+                )
         self._log.add(
             title,
-            "",
+            description,
             {
                 "k": k,
                 "candidates": c_rows,
@@ -165,12 +205,32 @@ class _AprioriSteps:
                     "alignments": ["left", "left"],
                 }
             )
-        self._log.add(f"Cấp k = {k} — Join & Prune", self._describe_join_prune(prev, k), data)
+        if not self._join_explained:
+            self._join_explained = True
+            description = (
+                f"[Mã giả Bước 4] Cₖ ← apriori_gen(L_{{k-1}})\n"
+                "\n"
+                "① Join (Ghép):\n"
+                "  Ghép 2 tập (k-1)-phần tử có cùng (k-2) phần tử đầu.\n"
+                "  Ví dụ: {A,B} và {A,C} → ghép → {A,B,C}\n"
+                "\n"
+                "② Prune (Cắt tỉa):\n"
+                "  Loại ứng viên nếu bất kỳ tập con (k-1)-phần tử\n"
+                "  nào của nó chưa có trong L_{k-1}.\n"
+                "  → Áp dụng tính chất anti-monotone.\n"
+                f"\nL_{k-1} = {self._format_level(prev)}"
+            )
+        else:
+            description = self._describe_join_prune(prev, k)
+        self._log.add(f"Cấp k = {k} — Sinh ứng viên C_{k} — Join & Prune", description, data)
 
     def stop_step(self, k: int) -> None:
         self._log.add(
             f"Cấp k = {k} — Dừng",
-            f"C_{k} = ∅ nên L_{k} = ∅. Thuật toán dừng.",
+            (
+                f"[Mã giả Bước 4] LẶP khi L_{{k-1}} ≠ ∅ — nhưng C_{k} = ∅.\n"
+                f"→ Không còn ứng viên → L_{k} = ∅. Thuật toán dừng."
+            ),
             {"k": k, "conclusion": f"  → Dừng tại k = {k}."},
             "WARNING",
         )
@@ -182,6 +242,10 @@ class _AprioriSteps:
             ["Cấp k", "Tập phổ biến", "Count", "Support"],
             freq_rows,
             ["right", "left", "right", "right"],
+            description=(
+                "[Mã giả Bước 5] L ← ∪ₖ Lₖ\n"
+                "① Tập phổ biến tối đại: không bị bao bởi tập phổ biến nào lớn hơn."
+            ),
             level="SUCCESS",
             frequent_rows=freq_rows,
             conclusion=(
@@ -193,13 +257,19 @@ class _AprioriSteps:
     def rules_step(self, rules: list[dict[str, Any]], minconf: float) -> None:
         self._log.add(
             "Sinh luật kết hợp",
-            "",
+            (
+                "[Mã giả Bước 6] Sinh luật X ⇒ Y với conf ≥ minconf\n"
+                "\n"
+                "① Luật kết hợp là gì?\n"
+                "  X ⇒ Y nghĩa là: nếu mua X thì thường cũng mua Y.\n"
+                "  conf(X ⇒ Y) = support(X∪Y) / support(X)."
+            ),
             {
                 "rules": rules,
                 "conclusion": (
-                    f"  → {len(rules)} luật đạt minconf = {minconf:.2%}."
+                    f"  → {len(rules)} luật đạt minconf = {fmt_pct(minconf)}."
                     if rules
-                    else f"  → Không có luật nào đạt minconf = {minconf:.2%}."
+                    else f"  → Không có luật nào đạt minconf = {fmt_pct(minconf)}."
                 ),
             },
             "SUCCESS",
@@ -214,7 +284,7 @@ class _AprioriSteps:
     @classmethod
     def _describe_join_prune(cls, prev: list[tuple[str, ...]], k: int) -> str:
         return (
-            f"Join L_{k-1} ⋈ L_{k-1}: hai tập trùng {k-2} phần tử đầu và phần tử cuối l1 < l2.\n"
+            f"[Mã giả Bước 4] Join L_{k-1} ⋈ L_{k-1} rồi Prune.\n"
             f"L_{k-1} = {cls._format_level(prev)}"
         )
 
