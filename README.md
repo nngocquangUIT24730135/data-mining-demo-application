@@ -18,3 +18,14 @@ uv run python -m pytest tests/ -v
 
 Logic thuật toán viết bằng pure Python. `matplotlib` / `networkx` chỉ dùng cho popup trực quan hóa.
 Xuất kết quả dạng TXT.
+
+## Kiến trúc
+
+```
+algorithms/   tính toán: run, predict, công thức
+steps/        dựng chữ console từ dữ liệu đã tính
+console/      vẽ bảng và tô màu
+fmt.py        định dạng số
+```
+
+`algorithms/` gọi `steps/`. Package `steps/` không import module thuật toán.

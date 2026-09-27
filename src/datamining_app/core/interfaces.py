@@ -36,3 +36,12 @@ class IVisualizer(Protocol):
 @runtime_checkable
 class IExporter(Protocol):
     def export(self, result: AlgorithmResult, path: str) -> None: ...
+
+
+
+class IStepBuilder(Protocol):
+    """Console step builder living in ``datamining_app.steps``.
+
+    Receives a step logger plus data the algorithm already computed, and appends
+    StepLog entries. Implementations must not change numeric results.
+    """

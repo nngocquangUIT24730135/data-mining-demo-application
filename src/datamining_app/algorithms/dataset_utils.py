@@ -22,6 +22,21 @@ ID_LIKE = {
     "diem",
 }
 
+# Point labels for K-Means. Separate from ID_LIKE so transaction loading
+# and clustering do not start dropping or renaming the same columns.
+POINT_ID_KEYS = {
+    "id",
+    "tid",
+    "pid",
+    "rid",
+    "u",
+    "point",
+    "point id",
+    "student id",
+    "object",
+    "instance",
+}
+
 
 def is_truthy(value: Any) -> bool:
     if value is None:
@@ -108,3 +123,17 @@ def to_float(value: Any) -> float | None:
         return float(text)
     except ValueError:
         return None
+
+
+__all__ = [
+    "ID_LIKE",
+    "POINT_ID_KEYS",
+    "excluded_headers",
+    "extract_transactions",
+    "format_itemset",
+    "is_truthy",
+    "looks_binary_column",
+    "minsup_count",
+    "support_count",
+    "to_float",
+]

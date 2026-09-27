@@ -256,18 +256,6 @@ REGISTRY: list[dict[str, Any]] = [
     },
     {
         "algorithm": "kmeans",
-        "table_name": "kmeans_1d_website_age",
-        "display_name": "Tuổi người dùng website — 19 giá trị 1D (k=2)",
-        "description": "19 giá trị tuổi người dùng website — minh họa K-Means trên dữ liệu 1 chiều bằng khoảng cách Manhattan.",
-        "default_config": {
-            "k": 2,
-            "distance": "manhattan",
-            "init": "random",
-            "max_iter": 30,
-        },
-    },
-    {
-        "algorithm": "kmeans",
         "table_name": "kmeans_2d_9pts",
         "display_name": "Tọa độ 2D — 9 điểm (k=3, Euclide)",
         "description": "9 điểm trong mặt phẳng 2D, phân thành 3 cụm — kiểm chứng từng vòng lặp gán điểm và cập nhật trọng tâm.",
@@ -325,7 +313,7 @@ REGISTRY = [entry for entry in ALL_REGISTRY if entry["table_name"] not in EXPORT
 DEFAULT_TABLES = {
     "apriori": "apriori_daily_basket_5tx",
     "binary_vector": "apriori_daily_basket_5tx",
-    "rough_set": "roughset_relation_7obj",
+    "rough_set": "roughset_weather_decision_8obj",
     "id3": "id3_weather_play",
     "cart_gini": "id3_weather_play",
     "naive_bayes": "id3_weather_play",

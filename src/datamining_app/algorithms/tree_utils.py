@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from datamining_app.core.models import PredictResult
+from datamining_app.steps.tree_steps import leaf_explanation, missing_branch_explanation
 
 
 def extract_tree_rules(tree: dict[str, Any]) -> list[dict[str, Any]]:
@@ -48,10 +49,7 @@ def predict_on_tree(
         children = node.get("children") or {}
         if value not in children:
             label = majority_class(node["class_counts"])
-            explanation = (
-                " → ".join(path)
-                + f"\nGiá trị '{value}' không có nhánh. Lớp đa số = {label}."
-            )
+            explanation = missing_branch_explanation(path, value, label)
             return PredictResult(
                 label=label,
                 explanation=explanation,
@@ -63,7 +61,9 @@ def predict_on_tree(
     path.append(f"Lá = {label}")
     return PredictResult(
         label=label,
-        explanation=f"Suy luận trên {algo_name}:\n  " + "\n  → ".join(path),
+        explanation=leaf_explanation(algo_name, path),
         details={"path": path, "leaf": node},
         sample=normalized,
     )
+
+__all__ = ["extract_tree_rules", "majority_class", "predict_on_tree"]

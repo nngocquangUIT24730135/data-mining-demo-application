@@ -57,3 +57,38 @@ def fmt_pct(v: float, decimals: int = PCT_DECIMALS) -> str:
 def fmt_centroid(coords: list[float] | tuple[float, ...]) -> str:
     """Format tọa độ trọng tâm (mỗi chiều 10 chữ số thập phân)."""
     return "(" + ", ".join(f"{v:.{DIST_DECIMALS}f}" for v in coords) + ")"
+
+
+def fmt_alpha(alpha: float) -> str:
+    """Format Laplace α: whole numbers without a decimal."""
+    if abs(alpha - round(alpha)) < 1e-12:
+        return str(int(round(alpha)))
+    return f"{alpha:g}"
+
+
+def fmt_number(value: float) -> str:
+    """Format a count-like float: integers without a decimal."""
+    if abs(value - round(value)) < 1e-12:
+        return str(int(round(value)))
+    return f"{value:g}"
+
+
+__all__ = [
+    "DIST_DECIMALS",
+    "INERTIA_DECIMALS",
+    "PCT_DECIMALS",
+    "PROB_DECIMALS",
+    "SCORE_DECIMALS",
+    "SUPPORT_DECIMALS",
+    "fmt_alpha",
+    "fmt_centroid",
+    "fmt_dist",
+    "fmt_inertia",
+    "fmt_number",
+    "fmt_pct",
+    "fmt_prob",
+    "fmt_ratio",
+    "fmt_score",
+    "fmt_score_diff",
+    "fmt_support",
+]

@@ -392,13 +392,6 @@ _DEFINED: list[tuple[str, list[str], list[tuple[Any, ...]]]] = [
         ],
     ),
     (
-        "kmeans_1d_website_age",
-        ["pid", "age"],
-        [(str(i + 1), age) for i, age in enumerate(
-            [15, 15, 16, 19, 19, 20, 20, 21, 22, 28, 35, 40, 41, 42, 43, 44, 60, 61, 65]
-        )],
-    ),
-    (
         "kmeans_2d_9pts",
         ["pid", "x", "y"],
         [

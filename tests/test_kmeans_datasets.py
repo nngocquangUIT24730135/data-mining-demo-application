@@ -26,15 +26,6 @@ def test_kmeans_student_manhattan(seeded_db):
     assert sum(len(v) for v in final.values()) == 10
 
 
-def test_kmeans_age_1d_manhattan(seeded_db):
-    ds = load_report_dataset(seeded_db, "kmeans_1d_website_age")
-    result = KMeansAlgorithm().run(ds, report_params("kmeans", "kmeans_1d_website_age"))
-    cents = sorted(c[0] for c in result.output["centroids"])
-    assert len(cents) == 2
-    assert cents[0] < cents[1]
-    assert len(result.output["history"]) <= result.parameters["max_iter"]
-
-
 def test_kmeans_9pts_k3_euclidean(seeded_db):
     ds = load_report_dataset(seeded_db, "kmeans_2d_9pts")
     result = KMeansAlgorithm().run(ds, report_params("kmeans", "kmeans_2d_9pts"))

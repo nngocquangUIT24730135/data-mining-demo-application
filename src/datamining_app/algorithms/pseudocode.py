@@ -160,3 +160,5 @@ PSEUDOCODE: dict[str, str] = {
     Manhattan: d(x,y) = Σ |xᵢ-yᵢ|       — tiêu chí SAE = Σ d
 """,
 }
+
+__all__ = ["PSEUDOCODE"]

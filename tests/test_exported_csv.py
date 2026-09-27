@@ -28,7 +28,7 @@ def test_half_the_datasets_live_in_csv():
     sqlite_names = {name for name, _, _ in TABLES}
     assert names == EXPORTED_TABLES
     assert not names & sqlite_names
-    assert len(sqlite_names) == 16
+    assert len(sqlite_names) == 15
     assert len(names) == 15
     assert all(entry["table_name"] not in EXPORTED_TABLES for entry in REGISTRY)
 

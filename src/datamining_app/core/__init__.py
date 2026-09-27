@@ -1,3 +1,4 @@
+from datamining_app.core.interfaces import IStepBuilder
 from datamining_app.core.models import (
     AlgorithmResult,
     Dataset,
@@ -8,6 +9,7 @@ from datamining_app.core.models import (
 
 __all__ = [
     "AlgorithmResult",
+    "IStepBuilder",
     "Dataset",
     "ParamDef",
     "PredictResult",
