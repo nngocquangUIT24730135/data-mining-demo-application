@@ -3,6 +3,25 @@ from __future__ import annotations
 import json
 from typing import Any
 
+# Những bảng này không đưa vào SQLite; file CSV cùng tên nằm ở thư mục data/.
+EXPORTED_TABLES = {
+    "apriori_monkey_5tx",
+    "apriori_grocery_25tx",
+    "apriori_butter_jam_5tx",
+    "apriori_numeric_7tx",
+    "apriori_beer_diaper_5tx",
+    "apriori_fptree_5tx",
+    "apriori_pharmacy_7tx",
+    "apriori_binary_matrix_8tx",
+    "apriori_math_10tx",
+    "roughset_relation_4obj",
+    "roughset_sunburn_8obj",
+    "id3_binary_simple",
+    "kmeans_2d_4pts_simple",
+    "kmeans_2d_16pts",
+    "kmeans_2d_14pts",
+}
+
 REGISTRY: list[dict[str, Any]] = [
     {
         "algorithm": "apriori",
@@ -196,34 +215,6 @@ REGISTRY: list[dict[str, Any]] = [
         "default_config": {"decision_attr": "Play"},
     },
     {
-        "algorithm": "naive_bayes",
-        "table_name": "nb_buy_mobile",
-        "display_name": "Dự đoán mua điện thoại — NB không làm trơn (14 khách)",
-        "description": "14 khách hàng — Naïve Bayes không làm trơn dự đoán buy_mobile.",
-        "default_config": {"decision_attr": "buy_mobile"},
-    },
-    {
-        "algorithm": "naive_bayes_laplace",
-        "table_name": "id3_buy_computer",
-        "display_name": "Mua máy tính AllElectronics — NB Laplace (14 mẫu)",
-        "description": "Cùng bảng ID3 AllElectronics, Naïve Bayes với làm mịn Laplace dự đoán buys_computer.",
-        "default_config": {"laplace_alpha": 1.0, "decision_attr": "buys_computer"},
-    },
-    {
-        "algorithm": "naive_bayes_laplace",
-        "table_name": "id3_weather_play",
-        "display_name": "Dự báo thời tiết — NB Laplace (14 ngày)",
-        "description": "Cùng bảng ID3 thời tiết, Naïve Bayes với làm mịn Laplace dự đoán Play.",
-        "default_config": {"laplace_alpha": 1.0, "decision_attr": "Play"},
-    },
-    {
-        "algorithm": "naive_bayes_laplace",
-        "table_name": "nb_buy_mobile",
-        "display_name": "Dự đoán mua điện thoại — NB Laplace (14 khách)",
-        "description": "14 khách hàng — Naïve Bayes Laplace dự đoán buy_mobile.",
-        "default_config": {"laplace_alpha": 1.0, "decision_attr": "buy_mobile"},
-    },
-    {
         "algorithm": "cart_gini",
         "table_name": "id3_weather_play",
         "display_name": "Dự báo thời tiết — CART Gini (14 ngày)",
@@ -315,6 +306,21 @@ for entry in list(REGISTRY):
         clone = dict(entry)
         clone["algorithm"] = "binary_vector"
         REGISTRY.append(clone)
+    elif entry["algorithm"] == "naive_bayes":
+        config = dict(entry["default_config"])
+        config["laplace_alpha"] = 1.0
+        REGISTRY.append(
+            {
+                "algorithm": "naive_bayes_laplace",
+                "table_name": entry["table_name"],
+                "display_name": entry["display_name"].replace("không làm trơn", "Laplace"),
+                "description": entry["description"].replace("không làm trơn", "với làm mịn Laplace"),
+                "default_config": config,
+            }
+        )
+
+ALL_REGISTRY = REGISTRY
+REGISTRY = [entry for entry in ALL_REGISTRY if entry["table_name"] not in EXPORTED_TABLES]
 
 DEFAULT_TABLES = {
     "apriori": "apriori_daily_basket_5tx",
@@ -344,7 +350,7 @@ def config_json(config: dict[str, Any]) -> str:
 
 
 def params_for(algorithm: str, table_name: str) -> dict[str, Any]:
-    for entry in REGISTRY:
+    for entry in ALL_REGISTRY:
         if entry["algorithm"] == algorithm and entry["table_name"] == table_name:
             return dict(entry["default_config"])
     return dict(ALGO_FALLBACK_PARAMS.get(algorithm, {}))

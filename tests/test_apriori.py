@@ -1,4 +1,5 @@
 from datamining_app.algorithms.apriori import AprioriAlgorithm
+from datamining_app.core.models import Dataset
 from tests.helpers import load_report_dataset, report_params
 
 
@@ -66,6 +67,29 @@ def test_apriori_math_5tx(seeded_db):
     levels = _run(seeded_db, "apriori_math_5tx").output["levels"]
     l2 = _itemsets(levels, 2)
     assert {("a", "b"), ("a", "c"), ("b", "c")} <= l2
+
+
+def test_empty_join_explains_why_c4_is_empty():
+    ds = Dataset(
+        name="two-triples",
+        headers=["Items"],
+        rows=[
+            {"Items": "A, B, C"},
+            {"Items": "A, B, C"},
+            {"Items": "D, E, F"},
+            {"Items": "D, E, F"},
+        ],
+    )
+    result = AprioriAlgorithm().run(ds, {"minsup": 0.5, "minconf": 0.75})
+    stop = next(step for step in result.steps if step.title.startswith("Cấp k = 4"))
+    text = stop.description
+    assert "L_3 vẫn còn" in text
+    assert "C_4 rỗng" in text
+    assert "{A, B, C}" in text and "{D, E, F}" in text
+    assert "2 phần tử đầu = {A, B}" in text
+    assert "2 phần tử đầu = {D, E}" in text
+    assert "Không có hai tập nào cùng 2 phần tử đầu" in text
+    assert "L_4 = {}" in text
 
 
 def test_apriori_math_10tx(seeded_db):

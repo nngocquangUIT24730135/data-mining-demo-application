@@ -170,7 +170,7 @@ def test_vector_and_column_uses_wedge():
                     "accepted": False,
                 }
             ],
-            "conclusion": "  → F_2 = ∅",
+            "conclusion": "  → F_2 = {}",
         },
         kind="table",
     )

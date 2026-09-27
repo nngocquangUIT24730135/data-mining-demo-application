@@ -339,7 +339,7 @@ class _KMeansSteps:
                 for point, assigned in zip(points, snap["assignments"])
                 if assigned == i
             ]
-            ids = ", ".join(members) or "∅"
+            ids = ", ".join(members) or "{}"
             cluster_lines.append(f"  → Cụm {i}: {{ {ids} }}   ({len(members)} điểm)")
         if iteration == 1:
             cluster_lines.append("  [Vòng đầu tiên — chưa có so sánh với vòng trước]")

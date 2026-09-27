@@ -36,6 +36,7 @@ class DataPanel(ttk.LabelFrame):
         self.exclude_cols: list[str] = []
         self.algorithm_key = algorithm_key
         self.get_params = get_params or (lambda: {})
+        self._default_table = default_table
         self._table_name = default_table
         self._datasets: list[DatasetMeta] = list_datasets(algorithm_key) if algorithm_key else []
         self._label_to_table = {d.display_name: d.table_name for d in self._datasets}
@@ -85,6 +86,19 @@ class DataPanel(ttk.LabelFrame):
         i18n.subscribe(self.refresh_texts)
         if default_table or labels:
             self.after(50, self.load_sqlite)
+
+    def reload_datasets(self) -> None:
+        self._datasets = list_datasets(self.algorithm_key) if self.algorithm_key else []
+        self._label_to_table = {d.display_name: d.table_name for d in self._datasets}
+        self._table_to_label = {d.table_name: d.display_name for d in self._datasets}
+        self._desc = {d.table_name: d.description for d in self._datasets}
+        labels = [d.display_name for d in self._datasets]
+        self.table_combo.configure(values=labels)
+        current = self._table_name if self._table_name in self._table_to_label else self._default_table
+        label = self._table_to_label.get(current, labels[0] if labels else "")
+        self.table_var.set(label)
+        if label:
+            self.load_sqlite()
 
     def refresh_texts(self, _lang: str | None = None) -> None:
         self.configure(text=i18n.t("data_panel"))

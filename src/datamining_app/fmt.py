@@ -43,6 +43,12 @@ def fmt_support(v: float) -> str:
     return f"{v:.{SUPPORT_DECIMALS}f}"
 
 
+def fmt_ratio(numer: int, denom: int) -> str:
+    """Phân số đếm rồi mới ra tỷ lệ thập phân, ví dụ 4/5 = 0.8000000000."""
+    value = numer / denom if denom else 0.0
+    return f"{numer}/{denom} = {fmt_support(value)}"
+
+
 def fmt_pct(v: float, decimals: int = PCT_DECIMALS) -> str:
     """Format hiển thị phần trăm con người đọc."""
     return f"{v * 100:.{decimals}f}%"

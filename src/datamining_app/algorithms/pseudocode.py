@@ -8,7 +8,7 @@ PSEUDOCODE: dict[str, str] = {
   Bước 1: C₁ ← tất cả item 1-phần tử
   Bước 2: L₁ ← {c ∈ C₁ : support(c) ≥ minsup}
   Bước 3: k ← 2
-  Bước 4: LẶP khi L_{k-1} ≠ ∅:
+  Bước 4: LẶP khi L_{k-1} ≠ {}:
        Cₖ ← apriori_gen(L_{k-1})   // Join rồi Prune
        VỚI mỗi ứng viên c ∈ Cₖ:
             đếm support(c) trên D
@@ -27,17 +27,25 @@ PSEUDOCODE: dict[str, str] = {
            minsup, minconf
   OUTPUT : Tập phổ biến F và luật R
 
+  // F₁ = tập các 1 phần tử phổ biến (1-itemset)
+  // F₂ = tập các 2 phần tử phổ biến (2-itemset)
+  // Fₖ = tập các k phần tử phổ biến (k-itemset)
+
   Bước 1: Xây ma trận ngữ cảnh nhị phân (O, I, R)
-     vector(i)[t] = 1 nếu item i xuất hiện trong giao dịch t
-  Bước 2: F₁ ← {i : |vector(i)| / |O| ≥ minsup}
+     v({i})[t] = 1 nếu item i xuất hiện trong giao dịch t
+     → Mỗi cột = v({item}) — mã hóa 1 LẦN, dùng mãi
+  Bước 2: F₁ ← {i : sum(v({i})) / |O| ≥ minsup}
   Bước 3: k ← 2
-  Bước 4: LẶP khi F_{k-1} ≠ ∅:
+  Bước 4: LẶP khi F_{k-1} ≠ {}:
        VỚI mỗi cặp (X, Y) ∈ F_{k-1} × F_{k-1}, |X ∪ Y| = k:
-            v ← vector(X) AND vector(Y)
-            NẾU |v| / |O| ≥ minsup → thêm X ∪ Y vào Fₖ
+            v(X∪Y) ← v(X) AND v(Y)
+            // v(X∪Y)[t] = 1  ⟺  T_t chứa đồng thời X lẫn Y
+            NẾU sum(v(X∪Y)) / |O| ≥ minsup → thêm X∪Y vào Fₖ
        k ← k + 1
   Bước 5: Sinh luật từ ∪ Fₖ với conf ≥ minconf
   Bước 6: Trả về F, R
+
+  Lợi thế: Không quét lại D — chỉ AND bit trên vector đã có.
 """,
     "rough_set": """ALGORITHM ROUGH-SET(U, C, D)
   INPUT  : U — vũ trụ đối tượng
@@ -65,7 +73,7 @@ PSEUDOCODE: dict[str, str] = {
   Bước 1: Tạo nút Root cho cây T; tính Entropy(S) = -Σ pᵢ log₂(pᵢ)
   Bước 2: NẾU tất cả mẫu trong S cùng lớp C:
        → Trả về nút lá với nhãn C  (tập thuần khiết)
-  Bước 3: NẾU Attributes = ∅ (hoặc đạt max_depth):
+  Bước 3: NẾU Attributes = {} (hoặc đạt max_depth):
        → Trả về nút lá với nhãn đa số trong S
   Bước 4: VỚI mỗi thuộc tính A ∈ Attributes:
        Info_A(S)  = Σ (|Sᵥ|/|S|) × Entropy(Sᵥ)
@@ -75,7 +83,7 @@ PSEUDOCODE: dict[str, str] = {
   Bước 6: Đặt A* làm thuộc tính phân nhánh tại Root
   Bước 7: VỚI mỗi giá trị v của A*:
        Sᵥ ← {x ∈ S : x[A*] = v}
-       NẾU Sᵥ = ∅ → Thêm lá với nhãn đa số trong S
+       NẾU Sᵥ = {} → Thêm lá với nhãn đa số trong S
        NGƯỢC LẠI → Thêm nhánh: ID3(Sᵥ, Attributes \\ {A*}, Target)
   Bước 8: Trả về cây quyết định T
 """,
@@ -116,7 +124,7 @@ PSEUDOCODE: dict[str, str] = {
   Bước 1: Tạo nút Root cho cây T; tính Gini(S) = 1 - Σ pᵢ²
   Bước 2: NẾU tất cả mẫu trong S cùng lớp C:
        → Trả về nút lá với nhãn C  (tập thuần khiết, Gini = 0)
-  Bước 3: NẾU Attributes = ∅ (hoặc đạt max_depth):
+  Bước 3: NẾU Attributes = {} (hoặc đạt max_depth):
        → Trả về nút lá với nhãn đa số trong S
   Bước 4: VỚI mỗi thuộc tính A ∈ Attributes:
        Gini_A(S) = Σ (|Sᵥ|/|S|) × Gini(Sᵥ)
@@ -126,7 +134,7 @@ PSEUDOCODE: dict[str, str] = {
   Bước 6: Đặt A* làm thuộc tính phân nhánh tại Root
   Bước 7: VỚI mỗi giá trị v của A*:
        Sᵥ ← {x ∈ S : x[A*] = v}
-       NẾU Sᵥ = ∅ → Thêm lá với nhãn đa số trong S
+       NẾU Sᵥ = {} → Thêm lá với nhãn đa số trong S
        NGƯỢC LẠI → Thêm nhánh: CART-GINI(Sᵥ, Attributes \\ {A*}, Target)
   Bước 8: Trả về cây quyết định T
 """,

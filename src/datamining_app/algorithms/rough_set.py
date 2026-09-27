@@ -113,8 +113,9 @@ class RoughSetAlgorithm(BaseAlgorithm):
         self._reducts = reducts
         self._condition = condition
         self._decision = decision
+        core_text = "{" + ", ".join(sorted(core)) + "}" if core else "{}"
         summary = (
-            f"Tìm {len(reducts)} reduct, Core = {{{', '.join(sorted(core)) or '∅'}}}. "
+            f"Tìm {len(reducts)} reduct, Core = {core_text}. "
             + (f"γ = {fmt_prob(gamma)}. {len(rules)} luật từ reduct {{{', '.join(sorted(chosen))}}}." if not info_system else "Bảng quan hệ (không có thuộc tính quyết định).")
         )
         result = AlgorithmResult(
@@ -251,12 +252,12 @@ class _RoughSetSteps:
                 "  Chỉ lấy lớp tương đương NẰM HOÀN TOÀN trong X.\n"
                 "\n"
                 '③ Xấp xỉ trên ĀX — "có thể thuộc X":\n'
-                "  = ∪{ [u]_A : [u]_A ∩ X ≠ ∅ }\n"
+                "  = ∪{ [u]_A : [u]_A ∩ X ≠ {} }\n"
                 "  Lấy mọi lớp tương đương CÓ GIAO với X.\n"
                 "\n"
                 '④ Biên BN(X) = ĀX \\ A̲X — "vùng mờ / không chắc":\n'
-                '  BN(X) = ∅ → X là "tập rõ" (crisp): phân loại hoàn hảo\n'
-                '  BN(X) ≠ ∅ → X là "tập thô" (rough): còn mâu thuẫn\n'
+                '  BN(X) = {} → X là "tập rõ" (crisp): phân loại hoàn hảo\n'
+                '  BN(X) ≠ {} → X là "tập thô" (rough): còn mâu thuẫn\n'
                 "\n"
                 "⑤ Độ chính xác xấp xỉ: α(X) = |A̲X| / |ĀX|\n"
                 "  α = 1.00 → hoàn hảo | α < 1 → có vùng mờ\n"
@@ -273,9 +274,9 @@ class _RoughSetSteps:
             f"Xấp xỉ tập X = lớp '{cls}'",
             ["Thành phần", "Tập hợp"],
             [
-                ["Xấp xỉ dưới A̲X", "{" + ", ".join(lower or ["∅"]) + "}"],
-                ["Xấp xỉ trên ĀX", "{" + ", ".join(upper or ["∅"]) + "}"],
-                ["Biên BN(X)", "{" + ", ".join(boundary or ["∅"]) + "}"],
+                ["Xấp xỉ dưới A̲X", "{" + ", ".join(lower) + "}" if lower else "{}"],
+                ["Xấp xỉ trên ĀX", "{" + ", ".join(upper) + "}" if upper else "{}"],
+                ["Biên BN(X)", "{" + ", ".join(boundary) + "}" if boundary else "{}"],
             ],
             description=description,
             level="SUCCESS" if alpha == 1 else "WARNING",
@@ -360,12 +361,12 @@ class _RoughSetSteps:
                 "  Core = ∩ (tất cả Reduct)\n"
                 "  → Thuộc tính trong Core xuất hiện trong MỌI Reduct\n"
                 "  → Không thể loại bỏ trong bất kỳ phương án nào.\n"
-                "  Core = ∅ → không có thuộc tính nào là bắt buộc."
+                "  Core = {} → không có thuộc tính nào là bắt buộc."
             ),
             level="SUCCESS",
             reducts=[sorted(r) for r in reducts],
             core=sorted(core),
-            conclusion="  → Core = " + ("{" + ", ".join(sorted(core)) + "}" if core else "∅"),
+            conclusion="  → Core = " + ("{" + ", ".join(sorted(core)) + "}" if core else "{}"),
         )
 
     def rules_step(self, rules: list[dict[str, Any]], chosen: set[str], decision: str) -> None:

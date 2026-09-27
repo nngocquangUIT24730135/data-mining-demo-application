@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from datamining_app.data.embedded_db.catalog import EXPORTED_TABLES
+
 # Each table: (table_name, headers, rows) where rows are tuples matching headers.
 
 
@@ -9,7 +11,7 @@ def _txn(rows: list[tuple[str, str]]) -> tuple[list[str], list[tuple[Any, ...]]]
     return ["tid", "items"], rows
 
 
-TABLES: list[tuple[str, list[str], list[tuple[Any, ...]]]] = [
+_DEFINED: list[tuple[str, list[str], list[tuple[Any, ...]]]] = [
     (
         "apriori_standard_9tx",
         *_txn(
@@ -361,26 +363,6 @@ TABLES: list[tuple[str, list[str], list[tuple[Any, ...]]]] = [
         ],
     ),
     (
-        "nb_buy_mobile",
-        ["RID", "age", "income", "Region", "credit_rating", "buy_mobile"],
-        [
-            (1, "<20", "high", "USA", "Low", "no"),
-            (2, "<20", "high", "USA", "High", "no"),
-            (3, "21...50", "high", "USA", "Low", "yes"),
-            (4, ">50", "medium", "USA", "Low", "yes"),
-            (5, ">50", "low", "PK", "Low", "yes"),
-            (6, ">50", "low", "PK", "High", "no"),
-            (7, "21...50", "low", "PK", "High", "yes"),
-            (8, "<20", "medium", "USA", "Low", "no"),
-            (9, "<20", "low", "PK", "Low", "yes"),
-            (10, ">50", "medium", "PK", "Low", "yes"),
-            (11, "<20", "medium", "PK", "High", "yes"),
-            (12, "21...50", "medium", "USA", "High", "yes"),
-            (13, "21...50", "high", "PK", "Low", "yes"),
-            (14, ">50", "medium", "USA", "High", "no"),
-        ],
-    ),
-    (
         "kmeans_2d_7pts",
         ["pid", "x", "y"],
         [
@@ -484,3 +466,5 @@ TABLES: list[tuple[str, list[str], list[tuple[Any, ...]]]] = [
         ],
     ),
 ]
+
+TABLES = [item for item in _DEFINED if item[0] not in EXPORTED_TABLES]

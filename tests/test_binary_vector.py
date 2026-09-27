@@ -16,7 +16,11 @@ def test_binary_vector_daily_basket(seeded_db):
     from datamining_app.console.formatter import ConsoleFormatter
 
     text = "\n".join(ConsoleFormatter().render_step(s) for s in result.steps if s.data.get("k") == 2)
-    assert "∧" in text
+    assert "v(" in text and "∧" in text
+    assert any("Thuật toán DỪNG" in (s.data or {}).get("conclusion", "") for s in result.steps)
+    rendered = "\n".join(ConsoleFormatter().render_step(s) for s in result.steps)
+    assert "Quy ước ký hiệu" in rendered
+    assert "đọc theo CỘT" in rendered
 
 
 def test_binary_vector_matches_apriori_standard(seeded_db):

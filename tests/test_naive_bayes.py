@@ -37,15 +37,6 @@ def test_nb_laplace_weather_play(seeded_db):
     assert pred.label.lower() == "no"
 
 
-def test_nb_classic_buy_mobile(seeded_db):
-    ds = load_report_dataset(seeded_db, "nb_buy_mobile")
-    algo = ClassicNaiveBayesAlgorithm()
-    algo.run(ds, report_params("naive_bayes", "nb_buy_mobile"))
-    pred = algo.predict({"age": "<20", "income": "medium", "Region": "USA", "credit_rating": "High"})
-    assert pred.label.lower() in {"yes", "no"}
-    assert pred.details["posteriors"]
-
-
 def test_nb_classic_likelihood_is_count_over_nc(seeded_db):
     ds = load_report_dataset(seeded_db, "id3_weather_play")
     result = ClassicNaiveBayesAlgorithm().run(ds, report_params("naive_bayes", "id3_weather_play"))

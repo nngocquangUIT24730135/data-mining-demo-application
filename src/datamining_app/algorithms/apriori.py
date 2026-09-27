@@ -11,7 +11,7 @@ from datamining_app.algorithms.dataset_utils import (
     support_count,
 )
 from datamining_app.core.models import AlgorithmResult, Dataset, ParamDef
-from datamining_app.fmt import fmt_pct, fmt_support
+from datamining_app.fmt import fmt_pct, fmt_ratio
 
 
 class AprioriAlgorithm(BaseAlgorithm):
@@ -61,9 +61,10 @@ class AprioriAlgorithm(BaseAlgorithm):
         prev = l1
         while prev:
             ck, pruned = apriori_gen(prev)
-            steps.join_prune_step(k, prev, ck, pruned)
+            if ck or pruned:
+                steps.join_prune_step(k, prev, ck, pruned)
             if not ck:
-                steps.stop_step(k)
+                steps.stop_step(k, prev, pruned)
                 break
             lk, ck_rows = _filter_frequent(ck, transactions, n, min_count, minsup)
             steps.level_step(k, ck_rows, lk)
@@ -80,18 +81,17 @@ class AprioriAlgorithm(BaseAlgorithm):
         for level_k, itemsets in levels.items():
             for itemset in itemsets:
                 sp = all_frequent[itemset]
-                freq_rows.append(
-                    [str(level_k), format_itemset(itemset), support_count(itemset, transactions), fmt_support(sp)]
-                )
+                count = support_count(itemset, transactions)
+                freq_rows.append([str(level_k), format_itemset(itemset), count, fmt_ratio(count, n)])
         n_freq = len(freq_rows)
         steps.summary_step(freq_rows, maximal)
-        rules = generate_association_rules(all_frequent, minconf)
+        rules = generate_association_rules(all_frequent, minconf, n)
         steps.rules_step(rules, minconf)
 
         summary = (
             f"Apriori tìm {n_freq} tập phổ biến "
             f"({len(rules)} luật đạt minconf = {fmt_pct(minconf)}). "
-            f"Tập phổ biến tối đại: {', '.join(format_itemset(x) for x in maximal) or '∅'}."
+            f"Tập phổ biến tối đại: {', '.join(format_itemset(x) for x in maximal) or '{}'}."
         )
         result = AlgorithmResult(
             algorithm_name=self.name,
@@ -113,11 +113,13 @@ class _AprioriSteps:
     def __init__(self, log: StepLogger) -> None:
         self._log = log
         self._min_count = 0
+        self._n = 0
         self._join_explained = False
         self._filter_explained = False
 
     def init_step(self, n: int, minsup: float, min_count: int, minconf: float) -> None:
         self._min_count = min_count
+        self._n = n
         self._log.add(
             "Khởi tạo",
             (
@@ -176,6 +178,7 @@ class _AprioriSteps:
             description,
             {
                 "k": k,
+                "n": self._n,
                 "candidates": c_rows,
                 "frequent": [list(x) for x in l_k],
                 "conclusion": conclusion,
@@ -190,8 +193,12 @@ class _AprioriSteps:
         ck: list[tuple[str, ...]],
         pruned: list[tuple[str, ...]],
     ) -> None:
+        prev_set = {tuple(sorted(x)) for x in prev}
         join_rows = [[format_itemset(x), "✓ Giữ"] for x in ck]
-        join_rows.extend([[format_itemset(x), "✗ Cắt tỉa (thiếu tập con k−1)"] for x in pruned])
+        for itemset in pruned:
+            missing = _missing_subsets(itemset, prev_set, k)
+            names = ", ".join(format_itemset(s) for s in missing)
+            join_rows.append([format_itemset(itemset), f"✗ Cắt tỉa — thiếu {names} trong L_{k - 1}"])
         data: dict[str, Any] = {
             "k": k,
             "join_candidates": [list(x) for x in ck],
@@ -224,16 +231,91 @@ class _AprioriSteps:
             description = self._describe_join_prune(prev, k)
         self._log.add(f"Cấp k = {k} — Sinh ứng viên C_{k} — Join & Prune", description, data)
 
-    def stop_step(self, k: int) -> None:
+    def stop_step(
+        self,
+        k: int,
+        prev: list[tuple[str, ...]],
+        pruned: list[tuple[str, ...]],
+    ) -> None:
         self._log.add(
-            f"Cấp k = {k} — Dừng",
-            (
-                f"[Mã giả Bước 4] LẶP khi L_{{k-1}} ≠ ∅ — nhưng C_{k} = ∅.\n"
-                f"→ Không còn ứng viên → L_{k} = ∅. Thuật toán dừng."
-            ),
-            {"k": k, "conclusion": f"  → Dừng tại k = {k}."},
+            f"Cấp k = {k} — Dừng vì C_{k} = {{}}",
+            self._explain_empty_candidates(prev, k, pruned),
+            {
+                "k": k,
+                "conclusion": f"  → L_{k - 1} ≠ {{}} nhưng C_{k} = {{}}, nên dừng tại k = {k}.",
+            },
             "WARNING",
         )
+
+    @staticmethod
+    def _explain_empty_candidates(
+        prev: list[tuple[str, ...]],
+        k: int,
+        pruned: list[tuple[str, ...]],
+    ) -> str:
+        ordered = sorted(tuple(sorted(itemset)) for itemset in prev)
+        prefix_len = k - 2
+        lines = [
+            f"L_{k - 1} vẫn còn {len(ordered)} tập phổ biến, nhưng C_{k} rỗng.",
+            f"Dừng không phải vì L_{k - 1} hết tập, mà vì phép Join không tạo được ứng viên.",
+            "",
+            f"① Muốn có một tập {k} phần tử, phải ghép hai tập trong L_{k - 1}.",
+        ]
+        if prefix_len <= 0:
+            lines.append("   Với k = 2, hai item bất kỳ đều ghép được với nhau.")
+            lines.append(f"   L_1 chỉ có {len(ordered)} item, chưa đủ một cặp.")
+            lines.append("")
+            lines.append(f"→ C_{k} = {{}}, không còn gì để đếm support. L_{k} = {{}}. Thuật toán dừng.")
+            return "\n".join(lines)
+
+        head = "phần tử đầu" if prefix_len == 1 else f"{prefix_len} phần tử đầu"
+        lines.extend(
+            [
+                f"   Hai tập chỉ ghép được khi trùng nhau ở {head}",
+                "   (đã sắp xếp theo thứ tự chữ cái), còn phần tử cuối thì khác nhau.",
+            ]
+        )
+        if prefix_len == 1:
+            lines.extend(
+                [
+                    "   Ví dụ: {A, B} và {A, C} trùng A → ghép thành {A, B, C}.",
+                    "   {A, B} và {C, D} có phần tử đầu A ≠ C → không ghép.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "   Ví dụ: {A, B, C} và {A, B, D} trùng {A, B} → ghép thành {A, B, C, D}.",
+                    "   {A, B, C} và {A, C, D} có tiền tố {A, B} ≠ {A, C} → không ghép.",
+                ]
+            )
+        lines.extend(["", f"② Tiền tố của từng tập trong L_{k - 1}:"])
+        groups: dict[tuple[str, ...], list[tuple[str, ...]]] = {}
+        for itemset in ordered:
+            prefix = itemset[:prefix_len]
+            groups.setdefault(prefix, []).append(itemset)
+            lines.append(
+                f"   {format_itemset(itemset)}"
+                f"  →  {head} = {format_itemset(prefix)}, phần tử cuối = {itemset[-1]}"
+            )
+        lines.append("")
+        joinable = [sets for sets in groups.values() if len(sets) >= 2]
+        if len(ordered) < 2:
+            lines.append(f"③ L_{k - 1} chỉ có một tập. Cần ít nhất hai tập khác nhau mới ghép được.")
+        elif not joinable:
+            lines.append(f"③ Không có hai tập nào cùng {head}.")
+            lines.append("   Phép Join không tạo ra cặp nào, nên tập ứng viên rỗng.")
+        else:
+            lines.append("③ Có cặp trùng tiền tố, nhưng mỗi ứng viên sau khi ghép đều bị cắt tỉa")
+            lines.append(f"   vì thiếu ít nhất một tập con {k - 1} phần tử trong L_{k - 1}:")
+            prev_set = set(ordered)
+            for itemset in pruned:
+                missing = ", ".join(format_itemset(s) for s in _missing_subsets(itemset, prev_set, k))
+                lines.append(f"   {format_itemset(itemset)} thiếu {missing}.")
+            lines.append("   Tính chất anti-monotone: thiếu một tập con phổ biến thì tập cha không phổ biến.")
+        lines.append("")
+        lines.append(f"→ C_{k} = {{}}, không còn gì để đếm support. L_{k} = {{}}. Thuật toán dừng.")
+        return "\n".join(lines)
 
     def summary_step(self, freq_rows: list[list[Any]], maximal: list[tuple[str, ...]]) -> None:
         n_freq = len(freq_rows)
@@ -250,7 +332,7 @@ class _AprioriSteps:
             frequent_rows=freq_rows,
             conclusion=(
                 f"  → {n_freq} tập phổ biến. "
-                f"Tối đại: {', '.join(format_itemset(x) for x in maximal) or '∅'}."
+                f"Tối đại: {', '.join(format_itemset(x) for x in maximal) or '{}'}."
             ),
         )
 
@@ -278,7 +360,7 @@ class _AprioriSteps:
     @staticmethod
     def _format_level(level: list[tuple[str, ...]]) -> str:
         if not level:
-            return "∅"
+            return "{}"
         return "{" + ", ".join(format_itemset(x) for x in level) + "}"
 
     @classmethod
@@ -287,6 +369,15 @@ class _AprioriSteps:
             f"[Mã giả Bước 4] Join L_{k-1} ⋈ L_{k-1} rồi Prune.\n"
             f"L_{k-1} = {cls._format_level(prev)}"
         )
+
+
+def _missing_subsets(
+    candidate: tuple[str, ...],
+    prev_set: set[tuple[str, ...]],
+    k: int,
+) -> list[tuple[str, ...]]:
+    ordered = tuple(sorted(candidate))
+    return [subset for subset in combinations(ordered, k - 1) if subset not in prev_set]
 
 
 def apriori_gen(prev: list[tuple[str, ...]]) -> tuple[list[tuple[str, ...]], list[tuple[str, ...]]]:
@@ -315,6 +406,7 @@ def apriori_gen(prev: list[tuple[str, ...]]) -> tuple[list[tuple[str, ...]], lis
 def generate_association_rules(
     supports: dict[tuple[str, ...], float],
     minconf: float,
+    n: int | None = None,
 ) -> list[dict[str, Any]]:
     rules: list[dict[str, Any]] = []
     support_lookup = {tuple(sorted(k)): v for k, v in supports.items()}
@@ -330,15 +422,18 @@ def generate_association_rules(
                     continue
                 confidence = sp / ant_sp
                 if confidence + 1e-12 >= minconf:
-                    rules.append(
-                        {
-                            "antecedent": list(antecedent),
-                            "consequent": list(consequent),
-                            "support": sp,
-                            "confidence": confidence,
-                            "itemset": list(itemset),
-                        }
-                    )
+                    rule: dict[str, Any] = {
+                        "antecedent": list(antecedent),
+                        "consequent": list(consequent),
+                        "support": sp,
+                        "confidence": confidence,
+                        "itemset": list(itemset),
+                    }
+                    if n:
+                        rule["n"] = n
+                        rule["support_count"] = int(round(sp * n))
+                        rule["antecedent_count"] = int(round(ant_sp * n))
+                    rules.append(rule)
     rules.sort(key=lambda r: (-r["confidence"], -r["support"], r["antecedent"], r["consequent"]))
     return rules
 

@@ -40,14 +40,17 @@ def _needs_reseed(path: Path) -> bool:
         return True
     with sqlite3.connect(path) as conn:
         names = _user_tables(conn)
-    if "dataset_registry" not in names:
-        return True
-    if names & LEGACY_TABLES:
-        return True
-    expected = {table for table, _, _ in TABLES} | {"dataset_registry"}
-    if not expected.issubset(names):
-        return True
-    return False
+        if "dataset_registry" not in names:
+            return True
+        if names & LEGACY_TABLES:
+            return True
+        expected = {table for table, _, _ in TABLES} | {"dataset_registry"}
+        if not expected.issubset(names):
+            return True
+        rows = conn.execute("SELECT algorithm, table_name FROM dataset_registry").fetchall()
+    actual = {(row[0], row[1]) for row in rows}
+    expected_pairs = {(entry["algorithm"], entry["table_name"]) for entry in REGISTRY}
+    return actual != expected_pairs
 
 
 def ensure_seeded(path: Path | None = None) -> Path:

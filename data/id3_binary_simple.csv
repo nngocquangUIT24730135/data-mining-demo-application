@@ -1,0 +1,7 @@
+﻿Instance,Attr_A,Attr_B,Attr_C,Attr_D
+1,T,T,T,T
+2,T,T,F,T
+3,F,F,T,F
+4,T,F,T,T
+5,F,F,F,F
+6,T,F,F,F

@@ -11,6 +11,7 @@ from datamining_app.console.tags import (
     reset_font_size,
     set_font_size,
 )
+from datamining_app.data.embedded_db.seed import seed_database
 from datamining_app.i18n import i18n
 from datamining_app.ui.pages.apriori_page import AprioriPage
 from datamining_app.ui.pages.binary_vector_page import BinaryVectorPage
@@ -74,6 +75,7 @@ class MainApp(tk.Tk):
         self.menubar = tk.Menu(self)
         self.file_menu = tk.Menu(self.menubar, tearoff=0)
         self.file_menu.add_command(label=i18n.t("menu_load_csv"), command=self._menu_load_csv)
+        self.file_menu.add_command(label=i18n.t("menu_reset_db"), command=self._reset_db)
         self.file_menu.add_separator()
         self.file_menu.add_command(label=i18n.t("menu_exit"), command=self.destroy)
         self.menubar.add_cascade(label=i18n.t("menu_file"), menu=self.file_menu)
@@ -229,6 +231,27 @@ class MainApp(tk.Tk):
         page = self.current_page()
         if page and hasattr(page, "data_panel"):
             page.data_panel.load_csv()
+
+    def _reset_db(self) -> None:
+        if not messagebox.askyesno(i18n.t("menu_reset_db"), i18n.t("reset_db_confirm"), parent=self):
+            return
+        try:
+            seed_database()
+        except Exception as exc:
+            messagebox.showerror(i18n.t("app_title"), i18n.t("error", msg=str(exc)), parent=self)
+            return
+        for page in self.pages.values():
+            panel = getattr(page, "data_panel", None)
+            if panel is not None and hasattr(panel, "reload_datasets"):
+                panel.reload_datasets()
+            console = getattr(page, "console", None)
+            if console is not None and hasattr(console, "clear"):
+                console.clear()
+            algorithm = getattr(page, "algorithm", None)
+            if algorithm is not None:
+                algorithm._trained = False
+                algorithm._last_result = None
+        messagebox.showinfo(i18n.t("menu_reset_db"), i18n.t("reset_db_done"), parent=self)
 
     def _set_busy(self, busy: bool, success: bool = False) -> None:
         self._cancel_pulse()

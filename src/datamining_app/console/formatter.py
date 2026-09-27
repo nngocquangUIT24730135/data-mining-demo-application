@@ -4,7 +4,7 @@ import unicodedata
 from typing import Any, Iterable, Sequence
 
 from datamining_app.core.models import AlgorithmResult, StepLog
-from datamining_app.fmt import SCORE_DECIMALS, fmt_pct, fmt_support
+from datamining_app.fmt import SCORE_DECIMALS, fmt_pct, fmt_ratio, fmt_support
 
 BOX = {
     "tl": "┌",
@@ -142,9 +142,18 @@ class ConsoleFormatter:
         for i, rule in enumerate(rule_list, start=1):
             lhs = _itemset(rule.get("antecedent") or rule.get("lhs") or [])
             rhs = _itemset(rule.get("consequent") or rule.get("rhs") or [])
-            sp = rule.get("support", 0)
-            conf = rule.get("confidence", 0)
-            rows.append([str(i), f"{lhs} → {rhs}", fmt_support(float(sp)), fmt_support(float(conf))])
+            rows.append(
+                [
+                    str(i),
+                    f"{lhs} → {rhs}",
+                    _ratio_or_support(rule.get("support_count"), rule.get("n"), rule.get("support", 0)),
+                    _ratio_or_support(
+                        rule.get("support_count"),
+                        rule.get("antecedent_count"),
+                        rule.get("confidence", 0),
+                    ),
+                ]
+            )
         return self.render_table(
             ["#", "Luật", "Support", "Confidence"],
             rows,
@@ -236,13 +245,13 @@ class ConsoleFormatter:
             for row in candidates:
                 verdict = "✓ Chấp nhận" if row.get("accepted") else "✗ Loại bỏ"
                 item = _itemset(row.get("itemset") or [])
-                sp = fmt_support(float(row.get("support", 0)))
+                sp = _ratio_or_support(row.get("count"), data.get("n"), row.get("support", 0))
                 if has_vector:
                     vec = "(" + ", ".join(str(b) for b in (row.get("vector") or [])) + ")"
                     if row.get("left") and row.get("right"):
-                        op = f"{_itemset(row['left'])} ∧ {_itemset(row['right'])}"
+                        op = f"v({_itemset(row['left'])}) ∧ v({_itemset(row['right'])})"
                     else:
-                        op = "vector 1-item"
+                        op = f"v({_itemset(row.get('itemset') or [])})"
                     rows.append([item, op, vec, row.get("count", ""), sp, verdict])
                 else:
                     rows.append([item, row.get("count", ""), sp, verdict])
@@ -258,6 +267,12 @@ class ConsoleFormatter:
                 ["left", "right", "right", "left"],
             )
         return ""
+
+
+def _ratio_or_support(numer: Any, denom: Any, fallback: Any) -> str:
+    if isinstance(numer, int) and isinstance(denom, int) and denom > 0:
+        return fmt_ratio(numer, denom)
+    return fmt_support(float(fallback or 0))
 
 
 COLUMN_PAD = 5  # extra spaces in every cell so box borders stay aligned in Consolas
@@ -313,7 +328,8 @@ def _should_render_rules(step: StepLog) -> bool:
 
 
 def _is_pipe_dump(description: str) -> bool:
-    return "|" in description and any(token in description for token in ("Count", "SP", "Vector", "Tập ứng viên"))
+    """Ẩn mô tả chỉ là bảng ASCII `| cột | cột |`, không ẩn ký hiệu lực lượng |O|."""
+    return any(line.strip().startswith("|") and line.count("|") >= 2 for line in description.splitlines())
 
 
 def _is_duplicate_of_table(description: str, data: dict[str, Any]) -> bool:

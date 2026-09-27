@@ -226,6 +226,8 @@ class LineTagger:
 
 def tag_for_line(line: str) -> str:
     stripped = line.lstrip()
+    if "Thuật toán DỪNG" in stripped or ("⟹" in stripped and "dừng" in stripped.lower()):
+        return "warning"
     if stripped.startswith(("╔", "║", "╚")):
         return "algo_header"
     if stripped.startswith("──"):
