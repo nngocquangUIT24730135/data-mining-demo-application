@@ -111,7 +111,7 @@ class _BinarySteps:
         else:
             conclusion = (
                 f"  → F_{k} = {{}}  (không có tập {k} phần tử nào đạt minsup)\n"
-                f"  ⟹ Thuật toán DỪNG: F_{k} = {{}} → không thể tạo F_{k + 1}."
+                f"  → Thuật toán DỪNG: F_{k} = {{}} → không thể tạo F_{k + 1}."
             )
         suffix = " (tập 1 phần tử phổ biến)" if k == 1 else f" (tập {k} phần tử phổ biến)"
         title = f"Cấp k = {k} — Vector F_{k}{suffix}" + (" — phép AND" if k >= 2 else "")

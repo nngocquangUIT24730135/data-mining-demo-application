@@ -173,12 +173,12 @@ class _KMeansSteps:
         if n_changed:
             verdict = (
                 f"[Mã giả Bước 2c] Kiểm tra hội tụ:\n"
-                f"→ Có {n_changed}/{k} tâm thay đổi ⟹ CHƯA hội tụ, tiếp tục vòng {iteration + 1}"
+                f"→ Có {n_changed}/{k} tâm thay đổi → CHƯA hội tụ, tiếp tục vòng {iteration + 1}"
             )
         else:
             verdict = (
                 "[Mã giả Bước 2c] Kiểm tra hội tụ:\n"
-                f"→ Tất cả {k} tâm không đổi ⟹ hội tụ"
+                f"→ Tất cả {k} tâm không đổi → hội tụ"
             )
         conclusion = (
             "\n".join(diff_lines)
@@ -262,7 +262,7 @@ class _KMeansSteps:
             "  đổi cụm → thuật toán đã tìm được phân hoạch ổn định.\n"
             "\n"
             f"  Tất cả K={k} trọng tâm KHÔNG thay đổi sau vòng lặp {iteration}.\n"
-            "  ✓ Điều kiện hội tụ thỏa mãn ⟹ DỪNG THUẬT TOÁN\n"
+            "  ✓ Điều kiện hội tụ thỏa mãn → DỪNG THUẬT TOÁN\n"
             "\n"
             f"{compare}\n"
             f"Kết luận: Thuật toán hội tụ sau {iteration} vòng lặp."
@@ -293,7 +293,7 @@ class _KMeansSteps:
             "  Dù chưa hội tụ, thuật toán vẫn dừng để tránh chạy vô hạn.\n"
             "\n"
             f"  Đã chạy đủ max_iter={max_iter} vòng lặp, trọng tâm vẫn còn thay đổi.\n"
-            "  ✗ Chưa hội tụ ⟹ DỪNG THEO GIỚI HẠN (max_iter)\n"
+            "  ✗ Chưa hội tụ → DỪNG THEO GIỚI HẠN (max_iter)\n"
             "\n"
             f"{compare}\n"
             "Kết quả có thể chưa tối ưu — thử tăng max_iter hoặc kiểm tra dữ liệu."
