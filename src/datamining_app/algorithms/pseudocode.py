@@ -58,8 +58,8 @@ PSEUDOCODE: dict[str, str] = {
   Bước 2: POS_B(D) ← vùng dương (xấp xỉ dưới) của D theo B
   Bước 3: Lập ma trận phân biệt M(u,v) = {a ∈ C : a(u) ≠ a(v)}
      chỉ với cặp khác lớp quyết định
-  Bước 4: f(C) ← ∧ (∨ M(u,v))   // hàm Boolean CNF
-  Bước 5: Đưa f(C) về DNF tối giản → mỗi hạng từ là một Reduct
+  Bước 4: f(C) ← ∧ (∨ M(u,v))   // dạng chuẩn tắc hội (CNF)
+  Bước 5: Đưa CNF đã rút gọn về dạng chuẩn tắc tuyển (DNF) → mỗi hạng tử là một Reduct
   Bước 6: Core ← giao tất cả Reduct
   Bước 7: Sinh luật IF-THEN từ reduct nhỏ nhất
   Bước 8: Trả về Reducts, Core, luật

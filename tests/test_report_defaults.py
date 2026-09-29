@@ -4,7 +4,7 @@ from datamining_app.report_defaults import DEFAULT_TABLES, params_for
 
 def test_report_defaults_follow_registry():
     assert DEFAULT_TABLES["apriori"] == "apriori_daily_basket_5tx"
-    assert DEFAULT_TABLES["rough_set"] == "roughset_weather_decision_8obj"
+    assert DEFAULT_TABLES["rough_set"] == "roughset_recruitment_8obj"
     assert DEFAULT_TABLES["kmeans"] == "kmeans_2d_7pts"
     assert params_for("apriori", "apriori_standard_9tx")["minsup"] == 0.2222
     assert params_for("id3", "id3_weather_play")["decision_attr"] == "Play"

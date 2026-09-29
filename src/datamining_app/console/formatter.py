@@ -75,8 +75,8 @@ class ConsoleFormatter:
         if conclusion:
             parts.append(str(conclusion).rstrip())
         elif structured:
-            extra = _conclusion_lines(description)
-            if extra and extra not in "\n".join(parts):
+            extra = _fresh_conclusion(description, "\n".join(parts))
+            if extra:
                 parts.append(extra)
         return "\n".join(p for p in parts if p is not None).rstrip() + "\n"
 
@@ -337,6 +337,15 @@ def _is_duplicate_of_table(description: str, data: dict[str, Any]) -> bool:
         if description.strip().startswith(("Các luật", "Không có luật")):
             return True
     return False
+
+
+def _fresh_conclusion(description: str, already: str) -> str:
+    extra = _conclusion_lines(description)
+    if not extra:
+        return ""
+    seen = {line.strip() for line in already.splitlines() if line.strip()}
+    fresh = [line for line in extra.splitlines() if line.strip() and line.strip() not in seen]
+    return "\n".join(fresh)
 
 
 def _conclusion_lines(description: str) -> str:

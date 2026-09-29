@@ -35,6 +35,27 @@ def test_roughset_sunburn_8(seeded_db):
     assert "Hair" in set(result.output["core"])
 
 
+def test_roughset_recruitment_is_default(seeded_db):
+    from datamining_app.data.embedded_db.catalog import DEFAULT_TABLES
+
+    assert DEFAULT_TABLES["rough_set"] == "roughset_recruitment_8obj"
+    ds = load_report_dataset(seeded_db, "roughset_recruitment_8obj")
+    result = RoughSetAlgorithm().run(ds, report_params("rough_set", "roughset_recruitment_8obj"))
+    assert _reducts(result) == {
+        frozenset({"Diploma", "Experience"}),
+        frozenset({"Experience", "Reference"}),
+    }
+    assert set(result.output["core"]) == {"Experience"}
+    cnf = next(s for s in result.steps if s.title.startswith("Hàm phân biệt"))
+    assert "dạng chuẩn tắc hội (CNF) ban đầu = " in cnf.description
+    assert "(Diploma ∨ Experience)" in cnf.description
+    assert cnf.data["headers"] == ["#", "Mệnh đề sau rút gọn"]
+    dnf = next(s for s in result.steps if s.title.startswith("Dạng chuẩn tắc tuyển"))
+    assert "f(C) dạng chuẩn tắc tuyển (DNF) = (Diploma ∧ Experience) ∨ (Experience ∧ Reference)" in dnf.description
+    assert "(Diploma ∧ Experience ∧ French)" not in dnf.description
+    assert dnf.data["headers"] == ["#", "Reduct"]
+
+
 def test_roughset_weather_8(seeded_db):
     ds = load_report_dataset(seeded_db, "roughset_weather_decision_8obj")
     result = RoughSetAlgorithm().run(ds, report_params("rough_set", "roughset_weather_decision_8obj"))

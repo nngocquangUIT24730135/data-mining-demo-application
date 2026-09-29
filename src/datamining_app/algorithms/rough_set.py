@@ -99,11 +99,11 @@ class RoughSetAlgorithm(BaseAlgorithm):
 
         clauses = unique_clauses(cells)
         absorbed = absorb_clauses(clauses)
-        steps.function_step(absorbed)
+        steps.function_step(clauses, absorbed)
 
         reducts = cnf_to_reducts(absorbed)
         core = set.intersection(*reducts) if reducts else set()
-        steps.reduct_step(reducts, core)
+        steps.reduct_step(absorbed, reducts, core)
 
         chosen = reducts[0] if reducts else set(condition)
         rules = [] if info_system else extract_rules(objects, chosen, decision)

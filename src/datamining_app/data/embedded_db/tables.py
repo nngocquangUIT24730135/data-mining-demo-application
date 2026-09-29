@@ -311,6 +311,20 @@ _DEFINED: list[tuple[str, list[str], list[tuple[Any, ...]]]] = [
         ],
     ),
     (
+        "roughset_recruitment_8obj",
+        ["ID", "Diploma", "Experience", "French", "Reference", "Decision"],
+        [
+            ("x1", "MBA", "Medium", "Yes", "Excellent", "Accept"),
+            ("x2", "MBA", "Low", "Yes", "Neutral", "Reject"),
+            ("x3", "MCE", "Low", "Yes", "Good", "Reject"),
+            ("x4", "MSc", "High", "Yes", "Neutral", "Accept"),
+            ("x5", "MSc", "Medium", "Yes", "Neutral", "Reject"),
+            ("x6", "MSc", "High", "Yes", "Excellent", "Accept"),
+            ("x7", "MBA", "High", "No", "Good", "Accept"),
+            ("x8", "MCE", "Low", "No", "Excellent", "Reject"),
+        ],
+    ),
+    (
         "id3_buy_computer",
         ["RID", "age", "income", "student", "credit_rating", "buys_computer"],
         [

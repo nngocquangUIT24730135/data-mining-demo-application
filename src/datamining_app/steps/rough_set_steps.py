@@ -157,54 +157,64 @@ class _RoughSetSteps:
             {"cells": cells, "universe": universe},
         )
 
-    def function_step(self, absorbed: list[set[str]]) -> None:
+    def function_step(self, original: list[set[str]], absorbed: list[set[str]]) -> None:
+        original_text = " ∧ ".join(self._clause_text(c) for c in original) or "(rỗng)"
+        absorbed_text = " ∧ ".join(self._clause_text(c) for c in absorbed) or "(rỗng)"
         self._log.add_table(
             "Hàm phân biệt f(C)",
-            ["#", "Mệnh đề"],
+            ["#", "Mệnh đề sau rút gọn"],
             [[str(i), self._clause_text(c)] for i, c in enumerate(absorbed, start=1)],
             ["right", "left"],
             description=(
                 "[Mã giả Bước 4] f(C) ← ∧ (∨ M(u,v))\n"
                 "\n"
-                "① Hàm Boolean f(C) — dạng CNF:\n"
-                "  Mỗi ô M(u,v) → 1 mệnh đề OR: (a₁ ∨ a₂ ∨ ...)\n"
+                "① Hàm Boolean f(C) — dạng chuẩn tắc hội (CNF), trước khi rút gọn:\n"
+                "  Mỗi ô M(u,v) khác rỗng → 1 tổng: (a₁ ∨ a₂ ∨ ...)\n"
                 '  Ý nghĩa: "Để phân biệt u và v, cần ÍT NHẤT 1 thuộc tính này."\n'
-                "  f(C) = AND của tất cả mệnh đề = CNF\n"
-                "  (Conjunctive Normal Form = tích của các tổng)\n"
+                "  f(C) = hội của mọi tổng đó, bỏ ô trùng.\n"
+                "  Dạng chuẩn tắc hội = tích của các tổng.\n"
                 "\n"
-                "② Rút gọn — Absorption:\n"
+                f"f(C) dạng chuẩn tắc hội (CNF) ban đầu = {original_text}\n"
+                "\n"
+                "② Rút gọn — luật hấp thụ:\n"
                 "  Nếu mệnh đề A ⊆ mệnh đề B → loại B (A đã bao quát B rồi).\n"
                 "  Ví dụ: (a) ⊆ (a ∨ b) → giữ (a), bỏ (a ∨ b).\n"
+                "  Bảng dưới là các mệnh đề còn lại.\n"
                 "\n"
-                "f(C) = " + (" ∧ ".join(self._clause_text(c) for c in absorbed) or "(rỗng)")
+                f"f(C) dạng chuẩn tắc hội (CNF) sau rút gọn = {absorbed_text}"
             ),
             clauses=[sorted(c) for c in absorbed],
+            clauses_original=[sorted(c) for c in original],
         )
 
-    def reduct_step(self, reducts: list[set[str]], core: set[str]) -> None:
+    def reduct_step(self, absorbed: list[set[str]], reducts: list[set[str]], core: set[str]) -> None:
+        cnf_text = " ∧ ".join(self._clause_text(c) for c in absorbed) or "(rỗng)"
+        dnf_text = self._dnf_text(reducts)
         self._log.add_table(
-            "Reduct (DNF) & Core",
+            "Dạng chuẩn tắc tuyển (DNF) & Core",
             ["#", "Reduct"],
             [[str(i), "{" + ", ".join(sorted(r)) + "}"] for i, r in enumerate(reducts, start=1)],
             ["right", "left"],
             description=(
-                "[Mã giả Bước 5] DNF tối giản → Reduct\n"
+                "[Mã giả Bước 5] Dạng chuẩn tắc hội đã rút gọn → dạng chuẩn tắc tuyển (DNF)\n"
                 "\n"
-                "① Chuyển CNF → DNF (Disjunctive Normal Form):\n"
-                "  CNF = tích của tổng: (a∨b) ∧ (a∨c) ∧ ...\n"
-                "  DNF = tổng của tích: ab ∨ ac ∨ ...\n"
-                "  → Nhân phân phối rồi hấp thụ (absorption).\n"
-                "  Mỗi hạng từ (monomial) của DNF = 1 Reduct.\n"
+                "① Lấy đúng dạng chuẩn tắc hội (CNF) sau rút gọn:\n"
+                f"  f(C) = {cnf_text}\n"
                 "\n"
-                "② Reduct — tập thuộc tính tối giản:\n"
+                "② Nhân phân phối thành dạng chuẩn tắc tuyển (DNF):\n"
+                "  Dạng chuẩn tắc tuyển = tổng của các tích.\n"
+                "  Mỗi hạng tử = 1 reduct.\n"
+                "\n"
+                f"f(C) dạng chuẩn tắc tuyển (DNF) = {dnf_text}\n"
+                "\n"
+                "③ Reduct — tập thuộc tính tối giản:\n"
                 "  Tập con của C vẫn giữ NGUYÊN khả năng phân biệt.\n"
                 "  Tối giản: bỏ bất kỳ thuộc tính nào → mất phân biệt.\n"
-                '  Có thể có nhiều Reduct (các "phương án" rút gọn khác nhau).\n'
+                '  Có thể có nhiều reduct (các "phương án" rút gọn khác nhau).\n'
                 "\n"
-                "③ Core — thuộc tính bắt buộc:\n"
-                "  Core = ∩ (tất cả Reduct)\n"
-                "  → Thuộc tính trong Core xuất hiện trong MỌI Reduct\n"
-                "  → Không thể loại bỏ trong bất kỳ phương án nào.\n"
+                "④ Core — thuộc tính bắt buộc:\n"
+                "  Core = ∩ (tất cả reduct)\n"
+                "  Thuộc tính trong Core xuất hiện trong mọi reduct.\n"
                 "  Core = {} → không có thuộc tính nào là bắt buộc."
             ),
             level="SUCCESS",
@@ -257,6 +267,17 @@ class _RoughSetSteps:
         if len(clause) == 1:
             return next(iter(clause))
         return "(" + " ∨ ".join(sorted(clause)) + ")"
+
+    @staticmethod
+    def _term_text(term: set[str]) -> str:
+        attrs = sorted(term)
+        if len(attrs) == 1:
+            return attrs[0]
+        return "(" + " ∧ ".join(attrs) + ")"
+
+    @classmethod
+    def _dnf_text(cls, terms: list[set[str]]) -> str:
+        return " ∨ ".join(cls._term_text(term) for term in terms) or "(rỗng)"
 
 
 

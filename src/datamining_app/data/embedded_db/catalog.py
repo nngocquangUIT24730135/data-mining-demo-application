@@ -180,6 +180,16 @@ REGISTRY: list[dict[str, Any]] = [
         },
     },
     {
+        "algorithm": "rough_set",
+        "table_name": "roughset_recruitment_8obj",
+        "display_name": "Tuyển dụng — 8 ứng viên",
+        "description": "8 ứng viên với bằng cấp, kinh nghiệm, tiếng Pháp và thư giới thiệu — hàm dạng chuẩn tắc hội đầy đủ, rồi rút gọn thành dạng chuẩn tắc tuyển để quyết định Accept/Reject.",
+        "default_config": {
+            "condition_attrs": ["Diploma", "Experience", "French", "Reference"],
+            "decision_attr": "Decision",
+        },
+    },
+    {
         "algorithm": "id3",
         "table_name": "id3_buy_computer",
         "display_name": "Mua máy tính AllElectronics — 14 mẫu",
@@ -313,7 +323,7 @@ REGISTRY = [entry for entry in ALL_REGISTRY if entry["table_name"] not in EXPORT
 DEFAULT_TABLES = {
     "apriori": "apriori_daily_basket_5tx",
     "binary_vector": "apriori_daily_basket_5tx",
-    "rough_set": "roughset_weather_decision_8obj",
+    "rough_set": "roughset_recruitment_8obj",
     "id3": "id3_weather_play",
     "cart_gini": "id3_weather_play",
     "naive_bayes": "id3_weather_play",
