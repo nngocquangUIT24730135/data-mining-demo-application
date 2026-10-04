@@ -8,5 +8,6 @@ build/
 .mypy_cache/
 .ruff_cache/
 *.db
+!src/datamining_app/data/embedded_db/datasets.db
 .DS_Store
 Thumbs.db
